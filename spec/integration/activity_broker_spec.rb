@@ -8,13 +8,11 @@ module AsyncHelper
     time_limit = Time.now + timeout
     loop do
       begin
-        puts 'calling code'
         yield
       rescue => error
       end
       return if error.nil?
       if Time.now >= time_limit
-        puts 'Test timeout exceeded'
         raise error
       end
       sleep interval
@@ -59,15 +57,7 @@ describe 'Activity Broker' do
 
     def pop
       if message = @to_read.gets(CRLF)
-        return message
-      end
-    end
-
-    def pop!
-      loop do
-        if message = @to_read.gets(CRLF)
-          return message
-        end
+        message
       end
     end
 
@@ -86,8 +76,13 @@ describe 'Activity Broker' do
       delivery_queue     = Queue.create
       subscribers_queue  = Queue.create
 
-      event_source_exchange = Exchange.new(@config[:event_source_exchange_port], event_source_queue, nil)
-      delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port], subscribers_queue, delivery_queue)
+      event_source_exchange = Exchange.new(@config[:event_source_exchange_port],
+                                           incoming_queue: event_source_queue,
+                                           lifecycle_listener: ExchangeLogger.new('event_source'))
+      delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port],
+                                        incoming_queue: subscribers_queue,
+                                        outgoing_queue: delivery_queue,
+                                        lifecycle_listener: ExchangeLogger.new('delivery exchange'))
 
       @pid1 = fork do
         event_source_exchange.monitor
@@ -100,80 +95,116 @@ describe 'Activity Broker' do
       @pid3 = fork do
         while message = event_source_queue.pop
           delivery_queue.push(message)
-          puts %{Master received message #{message}}
+          puts %{master received message #{message}}
         end
       end
     end
 
     def stop
-      puts %{Killing exchange #{@pid1}}
+      puts %{killing exchange #{@pid1}}
       Process.kill(:INT, @pid1)
-      puts %{Killing exchange #{@pid2}}
+      puts %{killing exchange #{@pid2}}
       Process.kill(:INT, @pid2)
-      puts %{Killing forwarder #{@pid3}}
+      puts %{killing forwarder #{@pid3}}
       Process.kill(:INT, @pid3)
     end
   end
 
-  class EventSourceExchangeLogger
+  class ExchangeLogger
+    def initialize(id)
+      @id = id
+    end
 
-  end
+    def monitoring_connections(port)
+      log 'started tcp server on ' + port.to_s
+    end
 
-  class SubscriberExchangeLogger
+    def new_client_connection_accepted
+      log 'new client connection accepted'
+    end
 
+    def monitoring_incoming_messages
+      log 'monitoring incoming messages'
+    end
+
+    def monitoring_outgoing_messages
+      log 'monitoring outgoing messages'
+    end
+
+    def message_received(message)
+      log 'message received' + message
+    end
+
+    def message_sent(message)
+      log 'message sent' + message
+    end
+
+    def before_exchange_exit
+      log 'exchange stopped'
+    end
+
+    def log(message)
+      puts @id + '|' + message
+    end
   end
 
   class Exchange
     attr_accessor :children
 
-    def initialize(port, incoming_queue, outgoing_queue)
+    def initialize(port, dependencies = {})
       @port = port
-      @children = []
-      @incoming_queue = incoming_queue
-      @outgoing_queue = outgoing_queue
+      @babysitting = []
+      @incoming_queue = dependencies[:incoming_queue]
+      @outgoing_queue = dependencies[:outgoing_queue]
+      @listener       = dependencies[:lifecycle_listener]
     end
 
     def monitor
-      @server = TCPServer.new(@port)
-      puts 'started tcp server on ' + @port.to_s
+      server = TCPServer.new(@port)
+      @listener.monitoring_connections(@port.to_s)
 
       trap_signal(:INT)
 
       loop do
-        puts 'running accept loop'
-        @connection = @server.accept
-        listen_for_messages_to_forward if @outgoing_queue
-        pid = fork do
-          loop do
-            puts 'running read loop ' + Process.pid.to_s
-            message = @connection.gets(CRLF)
-            if message
-              puts "I got a message! " + message
-              @incoming_queue.push(message)
-            end
-          end
-        end
-        @children << pid
+        @connection = server.accept
+        @listener.new_client_connection_accepted
+        monitor_outgoing_messages if @outgoing_queue
+        monitor_incoming_messages
+        @connection.close
       end
     end
 
-    def listen_for_messages_to_forward
+    def monitor_incoming_messages
       pid = fork do
-        puts 'waiting for messages to forward on' + Process.pid.to_s
-        while message_to_forward = @outgoing_queue.pop
-          @connection.write(message_to_forward)
-          puts 'Forwarded message' + message_to_forward
+        loop do
+          @listener.monitoring_incoming_messages
+          message = @connection.gets(CRLF)
+          if message
+            @listener.message_received(message)
+            @incoming_queue.push(message)
+          end
         end
       end
-      @children << pid
+      @babysitting << pid
+    end
+
+    def monitor_outgoing_messages
+      pid = fork do
+        @listener.monitoring_outgoing_messages
+        while message_to_forward = @outgoing_queue.pop
+          @connection.write(message_to_forward)
+          @listener.message_sent(message_to_forward)
+        end
+      end
+      @babysitting << pid
     end
 
     def trap_signal(signal)
       trap(signal) do
-        puts 'interrupting exchange ' + Process.pid.to_s
-        @children.each do |cpid|
+        @babysitting.each do |cpid|
           Process.kill(:INT, cpid)
         end
+        @listener.before_exchange_exit
         exit
       end
     end
@@ -184,7 +215,7 @@ describe 'Activity Broker' do
       @client_id = client_id
       @address = address
       @port = port
-      @children = []
+      @babysitting = []
       @events = []
     end
 
@@ -193,7 +224,6 @@ describe 'Activity Broker' do
       @readable_pipe, @writable_pipe = IO.pipe
       pid = fork do
         loop do
-          puts 'subscriber read loop'
           event = @connection.gets(CRLF)
           if event
             @events << event
@@ -205,8 +235,7 @@ describe 'Activity Broker' do
           end
         end
       end
-      @children << pid
-      puts 'subscriber pid' + pid.to_s
+      @babysitting << pid
     end
 
     def send_id
@@ -216,7 +245,7 @@ describe 'Activity Broker' do
 
     def received_broadcast_event?
       if message = @readable_pipe.gets(CRLF).gsub(CRLF, '')
-        puts 'Parent received event from broker' + message
+        puts 'reading event from broker' + message
         message == '1|B'
       end
     end
@@ -252,7 +281,7 @@ describe 'Activity Broker' do
   end
 
   after do
-    puts 'SHUTTING DOWN'
+    puts 'tearing down test setup'
     @runner.stop
   end
 end
