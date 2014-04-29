@@ -66,6 +66,10 @@ describe 'Activity Broker' do
       end
     end
 
+    def to_io
+      @to_read
+    end
+
     def push(message)
       @to_write.write(message)
     end
@@ -111,6 +115,32 @@ describe 'Activity Broker' do
       Process.kill(:INT, @pid2)
       puts %{killing forwarder #{@pid3}}
       Process.kill(:INT, @pid3)
+    end
+  end
+
+  class MessageReader
+    def initialize(io)
+      @io = io
+    end
+
+    def read_loop(timeout_seconds = 1, &on_message_received)
+      loop do
+        if ready = IO.select([@io], nil, nil, timeout_seconds)
+          on_message_received.call(next_message)
+        end
+      end
+    end
+
+    def read!(timeout_seconds = 1)
+      if ready = IO.select([@io], nil, nil, timeout_seconds)
+        next_message
+      end
+    end
+
+    private
+
+    def next_message
+      @io.to_io.gets(CRLF)
     end
   end
 
@@ -169,8 +199,8 @@ describe 'Activity Broker' do
 
       trap_signal(:INT)
 
-      loop do
-        @connection = server.accept
+      Socket.accept_loop(server) do |connection|
+        @connection = connection
         @listener.new_client_connection_accepted
         monitor_outgoing_messages if @outgoing_queue
         monitor_incoming_messages
@@ -180,27 +210,21 @@ describe 'Activity Broker' do
 
     def monitor_incoming_messages
       pid = fork do
-        loop do
-          @listener.monitoring_incoming_messages
-          message = @connection.gets(CRLF)
-          if message
-            @listener.message_received(message)
-            @incoming_queue.push(message)
-          end
+        @listener.monitoring_incoming_messages
+        MessageReader.new(@connection).read_loop do |message|
+          @listener.message_received(message)
+          @incoming_queue.push(message)
         end
-      end
+     end
       @babysitting << pid
     end
 
     def monitor_outgoing_messages
-      pid = fork do
-        @listener.monitoring_outgoing_messages
-        while message_to_forward = @outgoing_queue.pop
-          @connection.write(message_to_forward)
-          @listener.message_sent(message_to_forward)
-        end
+      @listener.monitoring_outgoing_messages
+      MessageReader.new(@outgoing_queue).read_loop do |message|
+        @connection.write(message)
+        @listener.message_sent(message)
       end
-      @babysitting << pid
     end
 
     def trap_signal(signal)
@@ -226,20 +250,12 @@ describe 'Activity Broker' do
     def start
       @connection = Socket.tcp(@address, @port)
       @readable_pipe, @writable_pipe = IO.pipe
-      pid = fork do
-        loop do
-          event = @connection.gets(CRLF)
-          if event
-            @events << event
-            puts "received event from broker " + event
-            @writable_pipe.write(event)
-          else
-            @connection.close
-            break
-          end
+      id = fork do
+        MessageReader.new(@connection).read_loop do |message|
+          @writable_pipe.write(message)
         end
       end
-      @babysitting << pid
+      @babysitting << id
     end
 
     def send_id
@@ -248,7 +264,7 @@ describe 'Activity Broker' do
     end
 
     def received_broadcast_event?
-      if message = @readable_pipe.gets(CRLF).gsub(CRLF, '')
+      if message = MessageReader.new(@readable_pipe).read!.gsub(CRLF, '')
         puts 'reading event from broker' + message
         message == '1|B'
       end
