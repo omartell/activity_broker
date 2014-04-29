@@ -45,9 +45,14 @@ describe 'Activity Broker' do
   end
 
   class Queue
-    def self.create
+    def self.create_with_pipes
       readable_pipe_sender, writable_pipe_sender = IO.pipe
       new(readable_pipe_sender, writable_pipe_sender)
+    end
+
+    def self.create_with_unix_sockets
+      child_socket, parent_socket = Socket.pair(:UNIX, :DGRAM, 0)
+      new(child_socket, parent_socket)
     end
 
     def initialize(to_read, to_write)
@@ -72,12 +77,11 @@ describe 'Activity Broker' do
     end
 
     def start
-      event_source_queue = Queue.create
-      delivery_queue     = Queue.create
-      subscribers_queue  = Queue.create
-
+      event_source_queue = Queue.create_with_unix_sockets
+      delivery_queue     = Queue.create_with_unix_sockets
+      subscribers_queue  = Queue.create_with_unix_sockets
       event_source_exchange = Exchange.new(@config[:event_source_exchange_port],
-                                           incoming_queue: event_source_queue,
+                                           incoming_queue: delivery_queue,
                                            lifecycle_listener: ExchangeLogger.new('event_source'))
       delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port],
                                         incoming_queue: subscribers_queue,
@@ -115,7 +119,7 @@ describe 'Activity Broker' do
       @id = id
     end
 
-    def monitoring_connections(port)
+    def monitoring_connections_on(port)
       log 'started tcp server on ' + port.to_s
     end
 
@@ -161,7 +165,7 @@ describe 'Activity Broker' do
 
     def monitor
       server = TCPServer.new(@port)
-      @listener.monitoring_connections(@port.to_s)
+      @listener.monitoring_connections_on(@port.to_s)
 
       trap_signal(:INT)
 
