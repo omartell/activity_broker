@@ -220,11 +220,14 @@ describe 'Activity Broker' do
     end
 
     def monitor_outgoing_messages
-      @listener.monitoring_outgoing_messages
-      MessageReader.new(@outgoing_queue).read_loop do |message|
-        @connection.write(message)
-        @listener.message_sent(message)
+      pid = fork do
+        @listener.monitoring_outgoing_messages
+        MessageReader.new(@outgoing_queue).read_loop do |message|
+          @connection.write(message)
+          @listener.message_sent(message)
+        end
       end
+      @babysitting << pid
     end
 
     def trap_signal(signal)
@@ -272,6 +275,9 @@ describe 'Activity Broker' do
 
     def stop
       @connection.close
+      @babysitting.each do |pid|
+        Process.kill(:INT, pid)
+      end
     end
   end
 
@@ -303,5 +309,6 @@ describe 'Activity Broker' do
   after do
     puts 'tearing down test setup'
     @runner.stop
+    @subscriber.stop
   end
 end
