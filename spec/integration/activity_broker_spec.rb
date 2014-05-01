@@ -86,35 +86,40 @@ describe 'Activity Broker' do
       subscribers_queue  = Queue.create_with_unix_sockets
       event_source_exchange = Exchange.new(@config[:event_source_exchange_port],
                                            incoming_queue: delivery_queue,
-                                           lifecycle_listener: ExchangeLogger.new('event_source'))
+                                           logger: ExchangeLogger.new('event_source'))
       delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port],
                                         incoming_queue: subscribers_queue,
                                         outgoing_queue: delivery_queue,
-                                        lifecycle_listener: ExchangeLogger.new('delivery exchange'))
+                                        logger: ExchangeLogger.new('delivery exchange'))
 
       @pid1 = fork do
+
         event_source_exchange.monitor
       end
 
       @pid2 = fork do
+
         delivery_exchange.monitor
       end
 
       @pid3 = fork do
+        trap(:INT){ exit }
         while message = event_source_queue.pop
           delivery_queue.push(message)
           puts %{master received message #{message}}
         end
       end
+
+      trap(:INT){ stop }
+
+      Process.waitall
     end
 
     def stop
-      puts %{killing exchange #{@pid1}}
-      Process.kill(:INT, @pid1)
-      puts %{killing exchange #{@pid2}}
-      Process.kill(:INT, @pid2)
-      puts %{killing forwarder #{@pid3}}
-      Process.kill(:INT, @pid3)
+      [@pid1, @pid2, @pid3].compact.each do |pid|
+        puts 'stopping runner subprocess' + pid.to_s
+        Process.kill(:INT, pid)
+      end
     end
   end
 
@@ -149,32 +154,30 @@ describe 'Activity Broker' do
       @id = id
     end
 
-    def monitoring_connections_on(port)
-      log 'started tcp server on ' + port.to_s
+    def notify(event, *other)
+      send(event, *other)
     end
 
-    def new_client_connection_accepted
-      log 'new client connection accepted'
+    private
+
+    def monitoring_connections(port)
+      log('started tcp server on ' + port.to_s)
     end
 
-    def monitoring_incoming_messages
-      log 'monitoring incoming messages'
-    end
-
-    def monitoring_outgoing_messages
-      log 'monitoring outgoing messages'
+    def new_client_connection_accepted(connection)
+      log('new client connection accepted')
     end
 
     def message_received(message)
-      log 'message received' + message
+      log('message received' + message)
     end
 
     def message_sent(message)
-      log 'message sent' + message
+      log('message sent' + message)
     end
 
-    def before_exchange_exit
-      log 'exchange stopped'
+    def exchange_exit
+      log('exchange stopped')
     end
 
     def log(message)
@@ -190,29 +193,29 @@ describe 'Activity Broker' do
       @babysitting = []
       @incoming_queue = dependencies[:incoming_queue]
       @outgoing_queue = dependencies[:outgoing_queue]
-      @listener       = dependencies[:lifecycle_listener]
+      @logger = dependencies[:logger]
     end
 
     def monitor
       server = TCPServer.new(@port)
-      @listener.monitoring_connections_on(@port.to_s)
+      @logger.notify(:monitoring_connections, @port)
 
       trap_signal(:INT)
 
       Socket.accept_loop(server) do |connection|
         @connection = connection
-        @listener.new_client_connection_accepted
+        @logger.notify(:new_client_connection_accepted, connection)
         monitor_outgoing_messages if @outgoing_queue
         monitor_incoming_messages
         @connection.close
       end
+      Process.waitall
     end
 
     def monitor_incoming_messages
       pid = fork do
-        @listener.monitoring_incoming_messages
         MessageReader.new(@connection).read_loop do |message|
-          @listener.message_received(message)
+          @logger.notify(:message_received, message)
           @incoming_queue.push(message)
         end
      end
@@ -221,10 +224,9 @@ describe 'Activity Broker' do
 
     def monitor_outgoing_messages
       pid = fork do
-        @listener.monitoring_outgoing_messages
         MessageReader.new(@outgoing_queue).read_loop do |message|
           @connection.write(message)
-          @listener.message_sent(message)
+          @logger.notify(:message_sent, message)
         end
       end
       @babysitting << pid
@@ -235,7 +237,7 @@ describe 'Activity Broker' do
         @babysitting.each do |cpid|
           Process.kill(:INT, cpid)
         end
-        @listener.before_exchange_exit
+        @logger.notify(:exchange_exit)
         exit
       end
     end
@@ -251,14 +253,20 @@ describe 'Activity Broker' do
     end
 
     def start
-      @connection = Socket.tcp(@address, @port)
+      begin
+        @connection = Socket.tcp(@address, @port)
+      rescue Errno::ECONNREFUSED
+        retry
+      end
       @readable_pipe, @writable_pipe = IO.pipe
       id = fork do
+        trap(:INT){ exit }
         MessageReader.new(@connection).read_loop do |message|
           @writable_pipe.write(message)
         end
       end
       @babysitting << id
+      Process.detach(id)
     end
 
     def send_id
@@ -290,8 +298,9 @@ describe 'Activity Broker' do
     #client receives event
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
-
-    @runner.start
+    @runnerpid = fork do
+      @runner.start
+    end
 
     @subscriber = FakeSubscriber.new('bob', 'localhost', 4485)
     @subscriber.start
@@ -308,6 +317,7 @@ describe 'Activity Broker' do
 
   after do
     puts 'tearing down test setup'
+    Process.kill(:INT, @runnerpid)
     @runner.stop
     @subscriber.stop
   end
