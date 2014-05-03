@@ -37,6 +37,7 @@ describe 'Activity Broker' do
     def send_broadcast_event
       @connection.write('1|B')
       @connection.write(CRLF)
+      puts 'sending event'
     end
 
     def stop
@@ -81,44 +82,53 @@ describe 'Activity Broker' do
     end
 
     def start
-      event_source_queue = Queue.create_with_unix_sockets
       delivery_queue     = Queue.create_with_unix_sockets
       subscribers_queue  = Queue.create_with_unix_sockets
       event_source_exchange = Exchange.new(@config[:event_source_exchange_port],
-                                           incoming_queue: delivery_queue,
-                                           logger: ExchangeLogger.new('event_source'))
+                                           logger: Logger.new('event_source'))
       delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port],
-                                        incoming_queue: subscribers_queue,
-                                        outgoing_queue: delivery_queue,
-                                        logger: ExchangeLogger.new('delivery exchange'))
+                                        logger: Logger.new('delivery exchange'))
 
-      @pid1 = fork do
+      @babysitting = []
 
-        event_source_exchange.monitor
+      @babysitting << fork do
+        trap_signal(:INT)
+        event_source_exchange.monitor do |client_connection|
+          @babysitting << fork do
+             trap(:INT){ exit }
+            client_connection.receive_messages{ |message| delivery_queue.push(message) }
+          end
+        end
+        client_connection.close
       end
 
-      @pid2 = fork do
-
-        delivery_exchange.monitor
-      end
-
-      @pid3 = fork do
-        trap(:INT){ exit }
-        while message = event_source_queue.pop
-          delivery_queue.push(message)
-          puts %{master received message #{message}}
+      @babysitting << fork do
+        trap_signal(:INT)
+        delivery_exchange.monitor do |client_connection|
+          @babysitting << fork do
+            trap(:INT){ exit }
+            client_connection.receive_messages{ |message| subscribers_queue.push(message) }
+          end
+          @babysitting << fork do
+            trap(:INT){ exit }
+            MessageReader.new(delivery_queue).each{ |message| client_connection.deliver_message(message) }
+          end
+          client_connection.close
         end
       end
 
-      trap(:INT){ stop }
+      trap_signal(:INT)
 
       Process.waitall
     end
 
-    def stop
-      [@pid1, @pid2, @pid3].compact.each do |pid|
-        puts 'stopping runner subprocess' + pid.to_s
-        Process.kill(:INT, pid)
+    def trap_signal(signal)
+      trap(signal) do
+        @babysitting.each do |cpid|
+          puts 'stopping process' + cpid.to_s
+          Process.kill(:INT, cpid)
+        end
+        exit
       end
     end
   end
@@ -128,10 +138,17 @@ describe 'Activity Broker' do
       @io = io
     end
 
+    def each(&block)
+      read_loop(1, &block)
+    end
+
     def read_loop(timeout_seconds = 1, &on_message_received)
       loop do
         if ready = IO.select([@io], nil, nil, timeout_seconds)
-          on_message_received.call(next_message)
+          message = next_message
+          unless message.nil?
+            on_message_received.call(message)
+          end
         end
       end
     end
@@ -149,7 +166,7 @@ describe 'Activity Broker' do
     end
   end
 
-  class ExchangeLogger
+  class Logger
     def initialize(id)
       @id = id
     end
@@ -160,7 +177,7 @@ describe 'Activity Broker' do
 
     private
 
-    def monitoring_connections(port)
+   def monitoring_connections(port)
       log('started tcp server on ' + port.to_s)
     end
 
@@ -185,6 +202,40 @@ describe 'Activity Broker' do
     end
   end
 
+  class ClientConnection
+    def initialize(connection, logger)
+      @connection = connection
+      @logger = logger
+    end
+
+    def receive_messages(&message_received)
+      MessageReader.new(@connection).each do |message|
+        puts 'message' + message
+        @logger.notify(:message_received, message)
+        message_received.call(message)
+      end
+    end
+
+    def deliver_message(message)
+      @connection.write(message)
+      @logger.notify(:message_sent, message)
+    end
+
+    def close
+      @connection.close
+    end
+  end
+
+  class MessageRouter
+    def receive_message
+
+    end
+
+    def deliver_message
+
+    end
+  end
+
   class Exchange
     attr_accessor :children
 
@@ -196,49 +247,13 @@ describe 'Activity Broker' do
       @logger = dependencies[:logger]
     end
 
-    def monitor
+    def monitor(&connection_received)
       server = TCPServer.new(@port)
       @logger.notify(:monitoring_connections, @port)
 
-      trap_signal(:INT)
-
       Socket.accept_loop(server) do |connection|
-        @connection = connection
         @logger.notify(:new_client_connection_accepted, connection)
-        monitor_outgoing_messages if @outgoing_queue
-        monitor_incoming_messages
-        @connection.close
-      end
-      Process.waitall
-    end
-
-    def monitor_incoming_messages
-      pid = fork do
-        MessageReader.new(@connection).read_loop do |message|
-          @logger.notify(:message_received, message)
-          @incoming_queue.push(message)
-        end
-     end
-      @babysitting << pid
-    end
-
-    def monitor_outgoing_messages
-      pid = fork do
-        MessageReader.new(@outgoing_queue).read_loop do |message|
-          @connection.write(message)
-          @logger.notify(:message_sent, message)
-        end
-      end
-      @babysitting << pid
-    end
-
-    def trap_signal(signal)
-      trap(signal) do
-        @babysitting.each do |cpid|
-          Process.kill(:INT, cpid)
-        end
-        @logger.notify(:exchange_exit)
-        exit
+        connection_received.call(ClientConnection.new(connection, Logger.new('client_connection')))
       end
     end
   end
@@ -272,6 +287,7 @@ describe 'Activity Broker' do
     def send_id
       @connection.write(@client_id)
       @connection.write(CRLF)
+      puts 'writing something'
     end
 
     def received_broadcast_event?
@@ -318,7 +334,6 @@ describe 'Activity Broker' do
   after do
     puts 'tearing down test setup'
     Process.kill(:INT, @runnerpid)
-    @runner.stop
     @subscriber.stop
   end
 end
