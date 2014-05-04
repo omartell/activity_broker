@@ -61,9 +61,9 @@ describe 'Activity Broker' do
       @to_write = to_write
     end
 
-    def pop
+    def pop!
       if message = @to_read.gets(CRLF)
-        message
+        message.gsub(CRLF, "")
       end
     end
 
@@ -73,6 +73,7 @@ describe 'Activity Broker' do
 
     def push(message)
       @to_write.write(message)
+      @to_write.write(CRLF)
     end
   end
 
@@ -111,7 +112,10 @@ describe 'Activity Broker' do
           end
           @babysitting << fork do
             trap(:INT){ exit }
-            MessageReader.new(delivery_queue).each{ |message| client_connection.deliver_message(message) }
+            loop do
+              message = delivery_queue.pop!
+              client_connection.deliver_message(message)
+            end
           end
           client_connection.close
         end
@@ -210,7 +214,6 @@ describe 'Activity Broker' do
 
     def receive_messages(&message_received)
       MessageReader.new(@connection).each do |message|
-        puts 'message' + message
         @logger.notify(:message_received, message)
         message_received.call(message)
       end
@@ -218,6 +221,7 @@ describe 'Activity Broker' do
 
     def deliver_message(message)
       @connection.write(message)
+      @connection.write(CRLF)
       @logger.notify(:message_sent, message)
     end
 
