@@ -35,9 +35,17 @@ describe 'Activity Broker' do
     end
 
     def send_broadcast_event
-      @connection.write('1|B')
+      send_event('1|B')
+    end
+
+    def send_follow_event
+      send_event('4327421|F|118|974')
+    end
+
+    def send_event(message)
+      puts 'sending event' + message
+      @connection.write(message)
       @connection.write(CRLF)
-      puts 'sending event'
     end
 
     def stop
@@ -61,19 +69,23 @@ describe 'Activity Broker' do
       @to_write = to_write
     end
 
+    def pop
+      if ready = IO.select([@to_read], nil, nil, 0)
+        pop!
+      end
+    end
+
     def pop!
       if message = @to_read.gets(CRLF)
         message.gsub(CRLF, "")
       end
     end
 
-    def to_io
-      @to_read
-    end
-
     def push(message)
       @to_write.write(message)
-      @to_write.write(CRLF)
+      unless message.scan(CRLF)
+        @to_write.write(CRLF)
+      end
     end
   end
 
@@ -83,58 +95,198 @@ describe 'Activity Broker' do
     end
 
     def start
-      delivery_queue     = Queue.create_with_unix_sockets
-      subscribers_queue  = Queue.create_with_unix_sockets
-      event_source_exchange = Exchange.new(@config[:event_source_exchange_port],
-                                           logger: Logger.new('event_source'))
-      delivery_exchange  = Exchange.new(@config[:subscriber_exchange_port],
-                                        logger: Logger.new('delivery exchange'))
-
-      @babysitting = []
-
-      @babysitting << fork do
-        trap_signal(:INT)
-        event_source_exchange.monitor do |client_connection|
-          @babysitting << fork do
-             trap(:INT){ exit }
-            client_connection.receive_messages{ |message| delivery_queue.push(message) }
-          end
-        end
-        client_connection.close
-      end
-
-      @babysitting << fork do
-        trap_signal(:INT)
-        delivery_exchange.monitor do |client_connection|
-          @babysitting << fork do
-            trap(:INT){ exit }
-            client_connection.receive_messages{ |message| subscribers_queue.push(message) }
-          end
-          @babysitting << fork do
-            trap(:INT){ exit }
-            loop do
-              message = delivery_queue.pop!
-              client_connection.deliver_message(message)
-            end
-          end
-          client_connection.close
-        end
-      end
-
-      trap_signal(:INT)
-
-      Process.waitall
-    end
-
-    def trap_signal(signal)
-      trap(signal) do
-        @babysitting.each do |cpid|
-          puts 'stopping process' + cpid.to_s
-          Process.kill(:INT, cpid)
-        end
+      trap(:INT) do
+        @event_source.stop
+        @clients.stop
         exit
       end
+
+
+      loop do
+        @event_loop = EventLoop.new
+        @event_forwarder = EventForwarder.new
+
+        @event_source = Server.new(@config[:event_source_exchange_port], @event_loop, self)
+
+        @event_source.listen
+
+        @clients = Server.new(@config[:subscriber_exchange_port], @event_loop, self)
+        @clients.listen
+
+        @event_loop.start
+      end
     end
+
+    def connection_accepted(connection)
+      stream = Stream.new(connection, @event_loop, MessageTranslator.new(@event_forwarder))
+      stream.start_reading
+    end
+
+  end
+
+  class Server
+    def initialize(port, io_loop, connection_listener)
+      @connections = []
+      @port = port
+      @io_loop = io_loop
+      @connection_listener = connection_listener
+    end
+
+    def listen
+      @server = TCPServer.new(@port)
+      @io_loop.register_read(self, :new_connection_ready)
+    end
+
+    def to_io
+      @server
+    end
+
+    def stop
+      @server.close
+    end
+
+    def new_connection_ready
+      connection = @server.accept_nonblock
+      @connection_listener.connection_accepted(connection)
+    end
+
+    private
+
+    def add_connection(c)
+      @connections << c
+    end
+  end
+
+  class EventForwarder
+    def initialize
+      @subscribers = {}
+    end
+
+    def new_subscriber(client_id, message, connection)
+      puts 'client_id_received' + client_id
+      @subscribers[client_id] = connection
+    end
+
+    def broadcast_event_received(event_id, message, connection)
+      puts 'received broadcast' + event_id.to_s + @subscribers.size.to_s
+      @subscribers.each do |client_id, connection|
+        connection.deliver(message)
+      end
+    end
+  end
+
+  class SubscriberPool
+    def initialize
+      @pool = {}
+    end
+    def add_subscriber(id, connection)
+      @pool[id] = connection
+    end
+  end
+
+  class MessageTranslator
+    def initialize(listener)
+      @listener = listener
+    end
+
+    def new_message(message, stream)
+      if message == '1|B'
+        @listener.broadcast_event_received(message, message, stream)
+      else
+        @listener.new_subscriber(message, message, stream)
+      end
+    end
+  end
+
+  class Stream
+    def initialize(io, io_loop, message_listener)
+      @io = io
+      @io_loop = io_loop
+      @read_buffer = ""
+      @message_listener = message_listener
+    end
+
+    def start_reading
+      @io_loop.register_read(self, :data_received)
+    end
+
+    def to_io
+      @io
+    end
+
+    def forward_messages
+      @read_buffer.scan(regex).flatten.each do |m|
+        @message_listener.new_message(m, self)
+      end
+      @read_buffer.gsub!(regex)
+    end
+
+    def data_received
+      begin
+        @read_buffer << @io.read_nonblock(4096)
+        forward_messages
+      rescue IO::WaitReadable
+        # Oops, turned out the IO wasn't actually readable.
+      rescue EOFError, Errno::ECONNRESET
+        # Connection closed
+      end
+    end
+
+    def regex
+      /([ A-Z | \d | a-z | \|]*)\/r\/n/
+    end
+
+    def deliver(message)
+      puts 'delivering' + message
+      @io.write(message)
+      @io.write(CRLF)
+    end
+  end
+
+  class EventLoop
+
+    def initialize
+      @reading = []
+      @writing = []
+    end
+
+    def start
+      loop do
+        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil, 0)
+        ((ready_writing || []) + (ready_reading || [])).each(&:notify)
+      end
+    end
+
+    def register_read(listener, event = nil, &block)
+      @reading << IOListener.new(listener, event, block)
+    end
+
+    def register_write(listener, event = nil, &block)
+      @writing << IOListener.new(listener, event, block)
+    end
+
+  end
+
+  class IOListener
+
+    def initialize(listener, event, block)
+      @listener = listener
+      @event = event
+      @block = block
+    end
+
+    def to_io
+      @listener.to_io
+    end
+
+    def notify
+      if @event
+        @listener.send(@event)
+      else
+        @block.call(@listener)
+      end
+    end
+
   end
 
   class MessageReader
@@ -146,7 +298,7 @@ describe 'Activity Broker' do
       read_loop(1, &block)
     end
 
-    def read_loop(timeout_seconds = 1, &on_message_received)
+    def read_loop(timeout_seconds = 0, &on_message_received)
       loop do
         if ready = IO.select([@io], nil, nil, timeout_seconds)
           message = next_message
@@ -157,7 +309,7 @@ describe 'Activity Broker' do
       end
     end
 
-    def read!(timeout_seconds = 1)
+    def read!(timeout_seconds = 0)
       if ready = IO.select([@io], nil, nil, timeout_seconds)
         next_message
       end
@@ -181,7 +333,7 @@ describe 'Activity Broker' do
 
     private
 
-   def monitoring_connections(port)
+    def monitoring_connections(port)
       log('started tcp server on ' + port.to_s)
     end
 
@@ -202,63 +354,7 @@ describe 'Activity Broker' do
     end
 
     def log(message)
-      puts @id + '|' + message
-    end
-  end
-
-  class ClientConnection
-    def initialize(connection, logger)
-      @connection = connection
-      @logger = logger
-    end
-
-    def receive_messages(&message_received)
-      MessageReader.new(@connection).each do |message|
-        @logger.notify(:message_received, message)
-        message_received.call(message)
-      end
-    end
-
-    def deliver_message(message)
-      @connection.write(message)
-      @connection.write(CRLF)
-      @logger.notify(:message_sent, message)
-    end
-
-    def close
-      @connection.close
-    end
-  end
-
-  class MessageRouter
-    def receive_message
-
-    end
-
-    def deliver_message
-
-    end
-  end
-
-  class Exchange
-    attr_accessor :children
-
-    def initialize(port, dependencies = {})
-      @port = port
-      @babysitting = []
-      @incoming_queue = dependencies[:incoming_queue]
-      @outgoing_queue = dependencies[:outgoing_queue]
-      @logger = dependencies[:logger]
-    end
-
-    def monitor(&connection_received)
-      server = TCPServer.new(@port)
-      @logger.notify(:monitoring_connections, @port)
-
-      Socket.accept_loop(server) do |connection|
-        @logger.notify(:new_client_connection_accepted, connection)
-        connection_received.call(ClientConnection.new(connection, Logger.new('client_connection')))
-      end
+      puts @id + ' | ' + message
     end
   end
 
@@ -267,7 +363,6 @@ describe 'Activity Broker' do
       @client_id = client_id
       @address = address
       @port = port
-      @babysitting = []
       @events = []
     end
 
@@ -277,67 +372,111 @@ describe 'Activity Broker' do
       rescue Errno::ECONNREFUSED
         retry
       end
-      @readable_pipe, @writable_pipe = IO.pipe
-      id = fork do
-        trap(:INT){ exit }
-        MessageReader.new(@connection).read_loop do |message|
-          @writable_pipe.write(message)
+    end
+
+    def monitor
+      Thread.new do
+        loop do
+          message = @connection.gets(CRLF)
+          @events << message.gsub!(CRLF)
         end
       end
-      @babysitting << id
-      Process.detach(id)
     end
 
     def send_id
       @connection.write(@client_id)
       @connection.write(CRLF)
-      puts 'writing something'
+      puts 'sending client id ' + @client_id
     end
 
     def received_broadcast_event?
-      if message = MessageReader.new(@readable_pipe).read!.gsub(CRLF, '')
-        puts 'reading event from broker' + message
-        message == '1|B'
+      received_event?('1|B')
+    end
+
+    def received_follow_event?
+      received_event?('4327421|F|118|974')
+    end
+
+    def received_event?(event)
+      if message = @events.last
+        message == event
+      else
+        begin
+          @read_buffer = @connection.read_nonblock(4096)
+          regex = /([ A-Z | \d | a-z | \|]*)\/r\/n/
+
+          unless @read_buffer.empty?
+            @read_buffer.scan(regex).flatten.each do |e|
+              @events << e
+            end
+            @read_buffer.gsub!(regex)
+          end
+        rescue IO::WaitReadable
+          # Oops, turned out the IO wasn't actually readable.
+        rescue EOFError, Errno::ECONNRESET
+          # Connection closed
+        end
       end
     end
 
     def stop
       @connection.close
-      @babysitting.each do |pid|
-        Process.kill(:INT, pid)
-      end
     end
   end
 
   specify 'A subscriber is notified of broadcast event' do
-    #start activity broker?
-    #event source connects
-    #client source connects
-    #source sends broadcast vent
-    #broker receives event
-    #client receives event
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
     @runnerpid = fork do
       @runner.start
     end
 
-    @subscriber = FakeSubscriber.new('bob', 'localhost', 4485)
-    @subscriber.start
-    @subscriber.send_id
+    bob = start_subscriber('bob', 4485)
 
     @source = FakeEventSource.new('localhost', 4484)
     @source.start
     @source.send_broadcast_event
 
     eventually do
-      expect(@subscriber.received_broadcast_event?).to eq true
+      expect(bob.received_broadcast_event?).to eq true
     end
   end
 
+  specify 'Two subscribers are notified of broadcast event' do
+    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                      subscriber_exchange_port: 4485 })
+    @runnerpid = fork do
+      @runner.start
+    end
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    @source = FakeEventSource.new('localhost', 4484)
+    @source.start
+    @source.send_broadcast_event
+
+    eventually do
+      expect(alice.received_broadcast_event?).to eq true
+      expect(bob.received_broadcast_event?).to eq true
+    end
+  end
+
+  def start_subscriber(id, port)
+    FakeSubscriber.new(id, 'localhost', port).tap do |s|
+      s.start
+      s.send_id
+      @subscribers.push(s)
+    end
+  end
+
+  before do
+    @subscribers = []
+  end
+
   after do
-    puts 'tearing down test setup'
-    Process.kill(:INT, @runnerpid)
-    @subscriber.stop
+    @source.stop
+    @subscribers.each(&:stop)
+    Process.kill(:INT, @runnerpid) if @runnerpid
   end
 end
