@@ -4,7 +4,7 @@ require 'socket'
 module AsyncHelper
   def eventually(options = {})
     timeout = options[:timeout]   || 5
-    interval = options[:interval] || 0.1
+    interval = options[:interval] || 0.0001
     time_limit = Time.now + timeout
     loop do
       begin
@@ -391,23 +391,16 @@ describe 'Activity Broker' do
     end
 
     def received_event?(event)
-      if message = @events.last
-        message == event
-      else
-        begin
-          @read_buffer = @connection.read_nonblock(4096)
-          regex = /([ A-Z | \d | a-z | \|]*)\/r\/n/
+      return @has_received_event if @has_received_event
 
-          unless @read_buffer.empty?
-            @read_buffer.scan(regex).flatten.each do |e|
-              @events << e
-            end
-            @read_buffer.gsub!(regex)
-          end
-        rescue IO::WaitReadable
-          # Oops, turned out the IO wasn't actually readable.
-        rescue EOFError, Errno::ECONNRESET
-          # Connection closed
+      if @events.size > 0
+        puts @client_id + ' got event: ' + event
+        @has_received_event = true
+        event == @events.last
+      else
+        read_ready, _, _ = IO.select([@connection], nil, nil, 0)
+        if read_ready
+          @events << read_ready.first.gets(CRLF)
         end
       end
     end
@@ -435,23 +428,23 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Two subscribers are notified of broadcast event' do
+  specify 'A couple of subscribers are notified of broadcast event' do
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
     @runnerpid = fork do
       @runner.start
     end
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    subscribers = 10.times.map do |id|
+      start_subscriber('alice' + id.to_s, 4485)
+    end
 
     @source = FakeEventSource.new('localhost', 4484)
     @source.start
     @source.send_broadcast_event
 
     eventually do
-      expect(alice.received_broadcast_event?).to eq true
-      expect(bob.received_broadcast_event?).to eq true
+      expect(subscribers.all?(&:received_broadcast_event?)).to eq true
     end
   end
 
