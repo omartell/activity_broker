@@ -96,44 +96,41 @@ describe 'Activity Broker' do
 
     def start
       trap(:INT) do
-        @event_source.stop
-        @clients.stop
+        @event_source_server.stop
+        @subscriber_server.stop
         exit
       end
 
-
       loop do
-        @event_loop = EventLoop.new
-        @event_forwarder = EventForwarder.new
+        event_loop = EventLoop.new
+        event_forwarder = EventForwarder.new
 
-        @event_source = Server.new(@config[:event_source_exchange_port], @event_loop, self)
+        @event_source_server = Server.new(@config[:event_source_exchange_port], event_loop)
+        @subscriber_server = Server.new(@config[:subscriber_exchange_port], event_loop)
 
-        @event_source.listen
+        @event_source_server.accept_connections do |message_stream|
+          message_stream.start_reading(MessageTranslator.new(event_forwarder))
+        end
 
-        @clients = Server.new(@config[:subscriber_exchange_port], @event_loop, self)
-        @clients.listen
+        @subscriber_server.accept_connections do |message_stream|
+          message_stream.start_reading(MessageTranslator.new(event_forwarder))
+        end
 
-        @event_loop.start
+        event_loop.start
       end
     end
-
-    def connection_accepted(connection)
-      stream = Stream.new(connection, @event_loop, MessageTranslator.new(@event_forwarder))
-      stream.start_reading
-    end
-
   end
 
   class Server
-    def initialize(port, io_loop, connection_listener)
+    def initialize(port, io_loop)
       @connections = []
       @port = port
       @io_loop = io_loop
-      @connection_listener = connection_listener
     end
 
-    def listen
+    def accept_connections(&connection_listener)
       @server = TCPServer.new(@port)
+      @connection_listener = connection_listener
       @io_loop.register_read(self, :new_connection_ready)
     end
 
@@ -147,7 +144,7 @@ describe 'Activity Broker' do
 
     def new_connection_ready
       connection = @server.accept_nonblock
-      @connection_listener.connection_accepted(connection)
+      @connection_listener.call(MessageStream.new(connection, @io_loop))
     end
 
     private
@@ -163,12 +160,12 @@ describe 'Activity Broker' do
     end
 
     def new_subscriber(client_id, message, connection)
-      puts 'client_id_received' + client_id
+      puts 'client_id_received ' + client_id
       @subscribers[client_id] = connection
     end
 
     def broadcast_event_received(event_id, message, connection)
-      puts 'received broadcast' + event_id.to_s + @subscribers.size.to_s
+      puts 'received broadcast ' + event_id.to_s + @subscribers.size.to_s
       @subscribers.each do |client_id, connection|
         connection.deliver(message)
       end
@@ -198,27 +195,20 @@ describe 'Activity Broker' do
     end
   end
 
-  class Stream
-    def initialize(io, io_loop, message_listener)
+  class MessageStream
+    def initialize(io, io_loop)
       @io = io
       @io_loop = io_loop
       @read_buffer = ""
-      @message_listener = message_listener
     end
 
-    def start_reading
+    def start_reading(message_listener)
+      @message_listener = message_listener
       @io_loop.register_read(self, :data_received)
     end
 
     def to_io
       @io
-    end
-
-    def forward_messages
-      @read_buffer.scan(regex).flatten.each do |m|
-        @message_listener.new_message(m, self)
-      end
-      @read_buffer.gsub!(regex)
     end
 
     def data_received
@@ -241,10 +231,16 @@ describe 'Activity Broker' do
       @io.write(message)
       @io.write(CRLF)
     end
+
+    def forward_messages
+      @read_buffer.scan(regex).flatten.each do |m|
+        @message_listener.new_message(m, self)
+      end
+      @read_buffer.gsub!(regex)
+    end
   end
 
   class EventLoop
-
     def initialize
       @reading = []
       @writing = []
@@ -264,11 +260,9 @@ describe 'Activity Broker' do
     def register_write(listener, event = nil, &block)
       @writing << IOListener.new(listener, event, block)
     end
-
   end
 
   class IOListener
-
     def initialize(listener, event, block)
       @listener = listener
       @event = event
@@ -286,7 +280,6 @@ describe 'Activity Broker' do
         @block.call(@listener)
       end
     end
-
   end
 
   class MessageReader
@@ -383,7 +376,7 @@ describe 'Activity Broker' do
       end
     end
 
-    def send_id
+    def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
       puts 'sending client id ' + @client_id
@@ -424,7 +417,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'A subscriber is notified of broadcast event' do
+  it 'A subscriber is notified of broadcast event' do
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
     @runnerpid = fork do
@@ -465,7 +458,7 @@ describe 'Activity Broker' do
   def start_subscriber(id, port)
     FakeSubscriber.new(id, 'localhost', port).tap do |s|
       s.start
-      s.send_id
+      s.send_client_id
       @subscribers.push(s)
     end
   end
