@@ -39,7 +39,11 @@ describe 'Activity Broker' do
     end
 
     def send_follow_event_to(followed, follower)
-      send_event('4327421|F|'+ follower + '|' + followed)
+      send_event('4327421|F|' + follower + '|' + followed)
+    end
+
+    def send_unfollow_event_to(unfollowed, unfollower)
+      send_event('4327361|U|' + unfollower + '|' + unfollowed)
     end
 
     def send_event(message)
@@ -399,6 +403,10 @@ describe 'Activity Broker' do
       received_event?('4327421|F|' + follower + '|' + @client_id)
     end
 
+    def received_unfollowed_event?(unfollower)
+      received_event?('4327361|U|' + unfollower + '|' + @client_id)
+    end
+
     def received_event?(event)
       return @has_received_event if @has_received_event
 
@@ -508,6 +516,33 @@ describe 'Activity Broker' do
 
       expect(robert.received_follow_event?('bob')).to eq true
       expect(robert.received_follow_event?('alice')).to eq true
+    end
+  end
+
+  specify 'Unfollowed notfication is forwarded to a previously followed subscriber' do
+    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                      subscriber_exchange_port: 4485 })
+    @runnerpid = fork do
+      @runner.start
+    end
+
+    bob     = start_subscriber('bob', 4485)
+    alice   = start_subscriber('alice', 4485)
+    robert  = start_subscriber('robert', 4485)
+
+    @source = FakeEventSource.new('localhost', 4484)
+    @source.start
+
+    @source.send_follow_event_to('bob', 'alice')
+
+    eventually do
+      expect(bob.received_unfollowed_event?('alice')).to eq true
+    end
+
+    @source.send_unfollow_event_to('bob', 'alice')
+
+    eventually do
+      @source.send_unfollow_event_to('bob', 'alice')
     end
   end
 
