@@ -193,7 +193,7 @@ describe 'Activity Broker' do
     def new_message(message, stream)
       id, event, from, to = message.split('|')
 
-      if message == '1|B'
+      if event == 'B'
         @listener.broadcast_event_received(message, message, stream)
       elsif event == 'F'
         @listener.followed_event_received(to, from, message, stream)
