@@ -241,7 +241,8 @@ describe 'Activity Broker' do
     end
 
     def forward_messages
-      @read_buffer.scan(/([^\/r\/n]*)\/r\/n/).flatten.each do |m|
+      @read_buffer.scan(/([^\/]*)\/r\/n/).flatten.each do |m|
+        puts 'forwarding message ' + m
         @message_listener.new_message(m, self)
       end
       @read_buffer.gsub!(regex)
@@ -456,7 +457,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Subscriber receives followed event after being followed by another subscriber' do
+  specify 'Subscriber receives followed event after event source sends follow notification' do
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
     @runnerpid = fork do
@@ -472,6 +473,41 @@ describe 'Activity Broker' do
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
+    end
+  end
+
+  specify 'Multiple followed events notifications are sent to followed subscribers' do
+    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                      subscriber_exchange_port: 4485 })
+    @runnerpid = fork do
+      @runner.start
+    end
+
+    bob     = start_subscriber('bob', 4485)
+    alice   = start_subscriber('alice', 4485)
+    robert  = start_subscriber('robert', 4485)
+
+    @source = FakeEventSource.new('localhost', 4484)
+    @source.start
+
+    @source.send_follow_event_to('bob', 'alice')
+    @source.send_follow_event_to('bob', 'robert')
+
+    @source.send_follow_event_to('alice', 'robert')
+    @source.send_follow_event_to('alice', 'bob')
+
+    @source.send_follow_event_to('robert', 'alice')
+    @source.send_follow_event_to('robert', 'bob')
+
+    eventually do
+      expect(bob.received_follow_event?('alice')).to eq true
+      expect(bob.received_follow_event?('robert')).to eq true
+
+      expect(alice.received_follow_event?('bob')).to eq true
+      expect(alice.received_follow_event?('robert')).to eq true
+
+      expect(robert.received_follow_event?('bob')).to eq true
+      expect(robert.received_follow_event?('alice')).to eq true
     end
   end
 
