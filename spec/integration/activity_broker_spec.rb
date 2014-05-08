@@ -38,8 +38,8 @@ describe 'Activity Broker' do
       send_event('1|B')
     end
 
-    def send_follow_event
-      send_event('4327421|F|118|974')
+    def send_follow_event_to(followed, follower)
+      send_event('4327421|F|'+ follower + '|' + followed)
     end
 
     def send_event(message)
@@ -170,6 +170,10 @@ describe 'Activity Broker' do
         connection.deliver(message)
       end
     end
+
+    def followed_event_received(followed, follower, message, connection)
+      @subscribers[followed].deliver(message)
+    end
   end
 
   class SubscriberPool
@@ -187,8 +191,12 @@ describe 'Activity Broker' do
     end
 
     def new_message(message, stream)
+      id, event, from, to = message.split('|')
+
       if message == '1|B'
         @listener.broadcast_event_received(message, message, stream)
+      elsif event == 'F'
+        @listener.followed_event_received(to, from, message, stream)
       else
         @listener.new_subscriber(message, message, stream)
       end
@@ -199,7 +207,7 @@ describe 'Activity Broker' do
     def initialize(io, io_loop)
       @io = io
       @io_loop = io_loop
-      @read_buffer = ""
+      @read_buffer = ''
     end
 
     def start_reading(message_listener)
@@ -227,13 +235,13 @@ describe 'Activity Broker' do
     end
 
     def deliver(message)
-      puts 'delivering' + message
+      puts 'delivering ' + message
       @io.write(message)
       @io.write(CRLF)
     end
 
     def forward_messages
-      @read_buffer.scan(regex).flatten.each do |m|
+      @read_buffer.scan(/([^\/r\/n]*)\/r\/n/).flatten.each do |m|
         @message_listener.new_message(m, self)
       end
       @read_buffer.gsub!(regex)
@@ -386,8 +394,8 @@ describe 'Activity Broker' do
       received_event?('1|B')
     end
 
-    def received_follow_event?
-      received_event?('4327421|F|118|974')
+    def received_follow_event?(follower)
+      received_event?('4327421|F|' + follower + '|' + @client_id)
     end
 
     def received_event?(event)
@@ -445,6 +453,25 @@ describe 'Activity Broker' do
 
     eventually do
       expect(subscribers.all?(&:received_broadcast_event?)).to eq true
+    end
+  end
+
+  specify 'Subscriber receives followed event after being followed by another subscriber' do
+    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                      subscriber_exchange_port: 4485 })
+    @runnerpid = fork do
+      @runner.start
+    end
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    @source = FakeEventSource.new('localhost', 4484)
+    @source.start
+    @source.send_follow_event_to('bob', 'alice')
+
+    eventually do
+      expect(bob.received_follow_event?('alice')).to eq true
     end
   end
 
