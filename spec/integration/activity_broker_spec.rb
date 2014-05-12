@@ -136,7 +136,7 @@ describe 'Activity Broker' do
     def accept_connections(&connection_listener)
       @server = TCPServer.new(@port)
       @connection_listener = connection_listener
-      @io_loop.register_read(self, :new_connection_ready)
+      @io_loop.register_read(self, :process_new_connection)
     end
 
     def to_io
@@ -147,12 +147,10 @@ describe 'Activity Broker' do
       @server.close
     end
 
-    def new_connection_ready
+    def process_new_connection
       connection = @server.accept_nonblock
       @connection_listener.call(MessageStream.new(connection, @io_loop))
     end
-
-    private
 
     def add_connection(c)
       @connections << c
@@ -164,19 +162,19 @@ describe 'Activity Broker' do
       @subscribers = {}
     end
 
-    def new_subscriber(client_id, message, connection)
+    def add_subscriber(client_id, message, connection)
       puts 'client_id_received ' + client_id
       @subscribers[client_id] = connection
     end
 
-    def broadcast_event_received(event_id, message, connection)
+    def process_broadcast_event(event_id, message, connection)
       puts 'received broadcast ' + event_id.to_s + @subscribers.size.to_s
       @subscribers.each do |client_id, connection|
         connection.deliver(message)
       end
     end
 
-    def followed_event_received(followed, follower, message, connection)
+    def process_follow_event(followed, follower, message, connection)
       @subscribers[followed].deliver(message)
     end
   end
@@ -195,15 +193,15 @@ describe 'Activity Broker' do
       @listener = listener
     end
 
-    def new_message(message, stream)
+    def process_message(message, stream)
       id, event, from, to = message.split('|')
 
       if event == 'B'
-        @listener.broadcast_event_received(message, message, stream)
+        @listener.process_broadcast_event(message, message, stream)
       elsif event == 'F'
-        @listener.followed_event_received(to, from, message, stream)
+        @listener.process_follow_event(to, from, message, stream)
       else
-        @listener.new_subscriber(message, message, stream)
+        @listener.add_subscriber(message, message, stream)
       end
     end
   end
@@ -248,7 +246,7 @@ describe 'Activity Broker' do
     def forward_messages
       @read_buffer.scan(/([^\/]*)\/r\/n/).flatten.each do |m|
         puts 'forwarding message ' + m
-        @message_listener.new_message(m, self)
+        @message_listener.process_message(m, self)
       end
       @read_buffer.gsub!(regex)
     end
