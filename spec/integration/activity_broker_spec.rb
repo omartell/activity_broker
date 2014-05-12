@@ -99,28 +99,29 @@ describe 'Activity Broker' do
     end
 
     def start
+      event_loop = EventLoop.new
+      event_forwarder = EventForwarder.new
+
+      @event_source_server = Server.new(@config[:event_source_exchange_port], event_loop)
+      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], event_loop)
+
+      @event_source_server.accept_connections do |message_stream|
+        message_stream.start_reading(MessageTranslator.new(event_forwarder))
+      end
+
+      @subscriber_server.accept_connections do |message_stream|
+        message_stream.start_reading(MessageTranslator.new(event_forwarder))
+      end
+
+      trap_signal
+      event_loop.start
+    end
+
+    def trap_signal
       trap(:INT) do
         @event_source_server.stop
         @subscriber_server.stop
         exit
-      end
-
-      loop do
-        event_loop = EventLoop.new
-        event_forwarder = EventForwarder.new
-
-        @event_source_server = Server.new(@config[:event_source_exchange_port], event_loop)
-        @subscriber_server = Server.new(@config[:subscriber_exchange_port], event_loop)
-
-        @event_source_server.accept_connections do |message_stream|
-          message_stream.start_reading(MessageTranslator.new(event_forwarder))
-        end
-
-        @subscriber_server.accept_connections do |message_stream|
-          message_stream.start_reading(MessageTranslator.new(event_forwarder))
-        end
-
-        event_loop.start
       end
     end
   end
