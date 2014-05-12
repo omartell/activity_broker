@@ -214,11 +214,17 @@ describe 'Activity Broker' do
     end
 
     def forward_messages
-      @read_buffer.scan(/([^\/]*)\/r\/n/).flatten.each do |m|
+      @read_buffer.scan(message_regex).flatten.each do |m|
         puts 'processing message ' + m
         @message_listener.process_message(m, self)
       end
-      @read_buffer = @read_buffer.gsub(regex, "")
+      @read_buffer = @read_buffer.gsub(message_regex, "")
+    end
+
+    private
+
+    def message_regex
+      /([^\/]*)\/r\/n/
     end
   end
 
