@@ -162,20 +162,25 @@ describe 'Activity Broker' do
       @subscribers = {}
     end
 
-    def add_subscriber(client_id, message, connection)
+    def add_subscriber(client_id, message, subscriber_stream)
       puts 'client_id_received ' + client_id
-      @subscribers[client_id] = connection
+      @subscribers[client_id] = subscriber_stream
     end
 
-    def process_broadcast_event(event_id, message, connection)
+    def process_broadcast_event(event_id, message, source_event_stream)
       puts 'forwarding broadcast ' + event_id.to_s + @subscribers.size.to_s
-      @subscribers.each do |client_id, connection|
-        connection.deliver(message)
+      @subscribers.each do |client_id, subscriber_stream|
+        subscriber_stream.deliver(message)
       end
     end
 
-    def process_follow_event(followed, follower, message, connection)
-      puts 'forwarding follow event'
+    def process_follow_event(followed, follower, message, source_event_stream)
+      puts 'forwarding follow event to ' + followed
+      @subscribers[followed].deliver(message)
+    end
+
+    def process_unfollow_event(followed, follower, message, source_event_stream)
+      puts 'forwarding unfollow event to ' + followed
       @subscribers[followed].deliver(message)
     end
   end
@@ -194,15 +199,17 @@ describe 'Activity Broker' do
       @listener = listener
     end
 
-    def process_message(message, stream)
+    def process_message(message, source_event_stream)
       id, event, from, to = message.split('|')
 
       if event == 'B'
-        @listener.process_broadcast_event(message, message, stream)
+        @listener.process_broadcast_event(message, message, source_event_stream)
       elsif event == 'F'
-        @listener.process_follow_event(to, from, message, stream)
+        @listener.process_follow_event(to, from, message, source_event_stream)
+      elsif event == 'U'
+        @listener.process_unfollow_event(to, from, message, source_event_stream)
       else
-        @listener.add_subscriber(message, message, stream)
+        @listener.add_subscriber(message, message, source_event_stream)
       end
     end
   end
@@ -225,7 +232,8 @@ describe 'Activity Broker' do
 
     def data_received
       begin
-        @read_buffer << @io.read_nonblock(4096)
+        read = @io.read_nonblock(4096)
+        @read_buffer << read
         forward_messages
       rescue IO::WaitReadable
         # Oops, turned out the IO wasn't actually readable.
@@ -249,7 +257,7 @@ describe 'Activity Broker' do
         puts 'processing message ' + m
         @message_listener.process_message(m, self)
       end
-      @read_buffer.gsub!(regex)
+      @read_buffer = @read_buffer.gsub(regex, "")
     end
   end
 
