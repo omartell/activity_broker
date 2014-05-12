@@ -344,18 +344,26 @@ describe 'Activity Broker' do
     end
   end
 
-  it 'A subscriber is notified of broadcast event' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+  let!(:broker) do
+    ApplicationRunner.new({ event_source_exchange_port: 4484,
+                            subscriber_exchange_port: 4485 })
+  end
+
+  let!(:source) do
+    FakeEventSource.new('localhost', 4484)
+  end
+
+  def start_activity_broker
+    @brokerpid = fork { broker.start }
+  end
+
+  specify 'A subscriber is notified of broadcast event' do
+    start_activity_broker
 
     bob = start_subscriber('bob', 4485)
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
-    @source.send_broadcast_event
+    source.start
+    source.send_broadcast_event
 
     eventually do
       expect(bob.received_broadcast_event?).to eq true
@@ -363,19 +371,14 @@ describe 'Activity Broker' do
   end
 
   specify 'A couple of subscribers are notified of broadcast event' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+    start_activity_broker
 
     subscribers = 10.times.map do |id|
       start_subscriber('alice' + id.to_s, 4485)
     end
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
-    @source.send_broadcast_event
+    source.start
+    source.send_broadcast_event
 
     eventually do
       expect(subscribers.all?(&:received_broadcast_event?)).to eq true
@@ -383,18 +386,13 @@ describe 'Activity Broker' do
   end
 
   specify 'Subscriber receives followed event after event source sends follow notification' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+    start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
-    @source.send_follow_event_to('bob', 'alice')
+    source.start
+    source.send_follow_event_to('bob', 'alice')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -402,27 +400,22 @@ describe 'Activity Broker' do
   end
 
   specify 'Multiple followed events notifications are sent to followed subscribers' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+    start_activity_broker
 
     bob     = start_subscriber('bob', 4485)
     alice   = start_subscriber('alice', 4485)
     robert  = start_subscriber('robert', 4485)
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
+    source.start
 
-    @source.send_follow_event_to('bob', 'alice')
-    @source.send_follow_event_to('bob', 'robert')
+    source.send_follow_event_to('bob', 'alice')
+    source.send_follow_event_to('bob', 'robert')
 
-    @source.send_follow_event_to('alice', 'robert')
-    @source.send_follow_event_to('alice', 'bob')
+    source.send_follow_event_to('alice', 'robert')
+    source.send_follow_event_to('alice', 'bob')
 
-    @source.send_follow_event_to('robert', 'alice')
-    @source.send_follow_event_to('robert', 'bob')
+    source.send_follow_event_to('robert', 'alice')
+    source.send_follow_event_to('robert', 'bob')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -437,20 +430,15 @@ describe 'Activity Broker' do
   end
 
   specify 'Unfollowed notfication is forwarded to subscriber' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+    start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
+    source.start
 
-    @source.send_follow_event_to('bob', 'alice')
-    @source.send_unfollow_event_to('bob', 'alice')
+    source.send_follow_event_to('bob', 'alice')
+    source.send_unfollow_event_to('bob', 'alice')
 
     eventually do
       expect(bob.received_unfollow_event?('alice')).to eq true
@@ -458,19 +446,14 @@ describe 'Activity Broker' do
   end
 
   specify 'Subscriber is notified of private message' do
-    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                      subscriber_exchange_port: 4485 })
-    @runnerpid = fork do
-      @runner.start
-    end
+    start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    @source = FakeEventSource.new('localhost', 4484)
-    @source.start
+    source.start
 
-    @source.send_private_message_to('bob', 'alice')
+    source.send_private_message_to('bob', 'alice')
 
     eventually do
       expect(bob.received_private_message?('alice')).to eq true
@@ -490,8 +473,8 @@ describe 'Activity Broker' do
   end
 
   after do
-    @source.stop
+    source.stop
     @subscribers.each(&:stop)
-    Process.kill(:INT, @runnerpid) if @runnerpid
+    Process.kill(:INT, @brokerpid) if @brokerpid
   end
 end
