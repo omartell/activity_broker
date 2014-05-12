@@ -42,7 +42,7 @@ describe 'Activity Broker' do
       send_event('4327421|F|' + follower + '|' + followed)
     end
 
-    def send_private_message_to(from, to)
+    def send_private_message_to(to, from)
       send_event('4327425|P|' + from + '|' + to)
     end
 
@@ -187,6 +187,10 @@ describe 'Activity Broker' do
       puts 'forwarding unfollow event to ' + followed
       @subscribers[followed].deliver(message)
     end
+
+    def process_private_message_event(to, from, message, source_event_stream)
+      @subscribers[to].deliver(message)
+    end
   end
 
   class SubscriberPool
@@ -212,6 +216,8 @@ describe 'Activity Broker' do
         @listener.process_follow_event(to, from, message, source_event_stream)
       elsif event == 'U'
         @listener.process_unfollow_event(to, from, message, source_event_stream)
+      elsif event == 'P'
+        @listener.process_private_message_event(to, from, message, source_event_stream)
       else
         @listener.add_subscriber(message, message, source_event_stream)
       end
