@@ -61,42 +61,6 @@ describe 'Activity Broker' do
     end
   end
 
-  class Queue
-    def self.create_with_pipes
-      readable_pipe_sender, writable_pipe_sender = IO.pipe
-      new(readable_pipe_sender, writable_pipe_sender)
-    end
-
-    def self.create_with_unix_sockets
-      child_socket, parent_socket = Socket.pair(:UNIX, :DGRAM, 0)
-      new(child_socket, parent_socket)
-    end
-
-    def initialize(to_read, to_write)
-      @to_read  = to_read
-      @to_write = to_write
-    end
-
-    def pop
-      if ready = IO.select([@to_read], nil, nil, 0)
-        pop!
-      end
-    end
-
-    def pop!
-      if message = @to_read.gets(CRLF)
-        message.gsub(CRLF, "")
-      end
-    end
-
-    def push(message)
-      @to_write.write(message)
-      unless message.scan(CRLF)
-        @to_write.write(CRLF)
-      end
-    end
-  end
-
   class ApplicationRunner
     def initialize(config)
       @config = config
@@ -193,15 +157,6 @@ describe 'Activity Broker' do
     end
   end
 
-  class SubscriberPool
-    def initialize
-      @pool = {}
-    end
-    def add_subscriber(id, connection)
-      @pool[id] = connection
-    end
-  end
-
   class MessageTranslator
     def initialize(listener)
       @listener = listener
@@ -250,10 +205,6 @@ describe 'Activity Broker' do
       rescue EOFError, Errno::ECONNRESET
         # Connection closed
       end
-    end
-
-    def regex
-      /([ A-Z | \d | a-z | \|]*)\/r\/n/
     end
 
     def deliver(message)
@@ -310,39 +261,6 @@ describe 'Activity Broker' do
       else
         @block.call(@listener)
       end
-    end
-  end
-
-  class MessageReader
-    def initialize(io)
-      @io = io
-    end
-
-    def each(&block)
-      read_loop(1, &block)
-    end
-
-    def read_loop(timeout_seconds = 0, &on_message_received)
-      loop do
-        if ready = IO.select([@io], nil, nil, timeout_seconds)
-          message = next_message
-          unless message.nil?
-            on_message_received.call(message)
-          end
-        end
-      end
-    end
-
-    def read!(timeout_seconds = 0)
-      if ready = IO.select([@io], nil, nil, timeout_seconds)
-        next_message
-      end
-    end
-
-    private
-
-    def next_message
-      @io.to_io.gets(CRLF)
     end
   end
 
