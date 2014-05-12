@@ -388,15 +388,6 @@ describe 'Activity Broker' do
       end
     end
 
-    def monitor
-      Thread.new do
-        loop do
-          message = @connection.gets(CRLF)
-          @events << message.gsub!(CRLF)
-        end
-      end
-    end
-
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
@@ -415,14 +406,16 @@ describe 'Activity Broker' do
       received_event?('4327361|U|' + unfollower + '|' + @client_id)
     end
 
-    def received_event?(event)
-      if @events.size > 0
-        event == @events.last
-      else
-        read_ready, _, _ = IO.select([@connection], nil, nil, 0)
-        if read_ready
-          puts @client_id + ' got event: ' + event
-          @events << read_ready.first.gets(CRLF)
+    def received_event?(expected_event)
+      return true if @events.include?(expected_event)
+
+      read_ready, _, _ = IO.select([@connection], nil, nil, 0)
+      if read_ready
+        buffer = read_ready.first.read_nonblock(4096)
+
+        buffer.split(CRLF).each do |e|
+          puts @client_id + ' got event: ' + e
+          @events << e
         end
       end
     end
