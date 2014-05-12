@@ -1,24 +1,6 @@
 require 'spec_helper'
+require 'support/async_helper'
 require 'socket'
-
-module AsyncHelper
-  def eventually(options = {})
-    timeout = options[:timeout]   || 5
-    interval = options[:interval] || 0.0001
-    time_limit = Time.now + timeout
-    loop do
-      begin
-        yield
-      rescue => error
-      end
-      return if error.nil?
-      if Time.now >= time_limit
-        raise error
-      end
-      sleep interval
-    end
-  end
-end
 
 describe 'Activity Broker' do
   include AsyncHelper
