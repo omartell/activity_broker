@@ -517,7 +517,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Unfollowed notfication is forwarded to a previously followed subscriber' do
+  specify 'Unfollowed notfication is forwarded to subscriber' do
     @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
                                       subscriber_exchange_port: 4485 })
     @runnerpid = fork do
