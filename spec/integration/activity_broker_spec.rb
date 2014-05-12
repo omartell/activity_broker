@@ -42,6 +42,10 @@ describe 'Activity Broker' do
       send_event('4327421|F|' + follower + '|' + followed)
     end
 
+    def send_private_message_to(from, to)
+      send_event('4327425|P|' + from + '|' + to)
+    end
+
     def send_unfollow_event_to(unfollowed, unfollower)
       send_event('4327361|U|' + unfollower + '|' + unfollowed)
     end
@@ -375,9 +379,9 @@ describe 'Activity Broker' do
   class FakeSubscriber
     def initialize(client_id, address, port)
       @client_id = client_id
-      @address = address
-      @port = port
-      @events = []
+      @address   = address
+      @port      = port
+      @events    = []
     end
 
     def start
@@ -406,13 +410,16 @@ describe 'Activity Broker' do
       received_event?('4327361|U|' + unfollower + '|' + @client_id)
     end
 
+    def received_private_message?(from)
+      received_event?('4327425|P|' + from + '|' + @client_id)
+    end
+
     def received_event?(expected_event)
       return true if @events.include?(expected_event)
 
       read_ready, _, _ = IO.select([@connection], nil, nil, 0)
       if read_ready
         buffer = read_ready.first.read_nonblock(4096)
-
         buffer.split(CRLF).each do |e|
           puts @client_id + ' got event: ' + e
           @events << e
@@ -524,19 +531,37 @@ describe 'Activity Broker' do
       @runner.start
     end
 
-    bob     = start_subscriber('bob', 4485)
-    alice   = start_subscriber('alice', 4485)
-    robert  = start_subscriber('robert', 4485)
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
 
     @source = FakeEventSource.new('localhost', 4484)
     @source.start
 
     @source.send_follow_event_to('bob', 'alice')
-
     @source.send_unfollow_event_to('bob', 'alice')
 
     eventually do
       expect(bob.received_unfollow_event?('alice')).to eq true
+    end
+  end
+
+  specify 'Subscriber is notified of private message' do
+    @runner = ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                      subscriber_exchange_port: 4485 })
+    @runnerpid = fork do
+      @runner.start
+    end
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    @source = FakeEventSource.new('localhost', 4484)
+    @source.start
+
+    @source.send_private_message_to('bob', 'alice')
+
+    eventually do
+      expect(bob.received_private_message?('alice')).to eq true
     end
   end
 
