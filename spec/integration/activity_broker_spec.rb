@@ -168,13 +168,14 @@ describe 'Activity Broker' do
     end
 
     def process_broadcast_event(event_id, message, connection)
-      puts 'received broadcast ' + event_id.to_s + @subscribers.size.to_s
+      puts 'forwarding broadcast ' + event_id.to_s + @subscribers.size.to_s
       @subscribers.each do |client_id, connection|
         connection.deliver(message)
       end
     end
 
     def process_follow_event(followed, follower, message, connection)
+      puts 'forwarding follow event'
       @subscribers[followed].deliver(message)
     end
   end
@@ -245,7 +246,7 @@ describe 'Activity Broker' do
 
     def forward_messages
       @read_buffer.scan(/([^\/]*)\/r\/n/).flatten.each do |m|
-        puts 'forwarding message ' + m
+        puts 'processing message ' + m
         @message_listener.process_message(m, self)
       end
       @read_buffer.gsub!(regex)
@@ -402,20 +403,17 @@ describe 'Activity Broker' do
       received_event?('4327421|F|' + follower + '|' + @client_id)
     end
 
-    def received_unfollowed_event?(unfollower)
+    def received_unfollow_event?(unfollower)
       received_event?('4327361|U|' + unfollower + '|' + @client_id)
     end
 
     def received_event?(event)
-      return @has_received_event if @has_received_event
-
       if @events.size > 0
-        puts @client_id + ' got event: ' + event
-        @has_received_event = true
         event == @events.last
       else
         read_ready, _, _ = IO.select([@connection], nil, nil, 0)
         if read_ready
+          puts @client_id + ' got event: ' + event
           @events << read_ready.first.gets(CRLF)
         end
       end
@@ -534,14 +532,10 @@ describe 'Activity Broker' do
 
     @source.send_follow_event_to('bob', 'alice')
 
-    eventually do
-      expect(bob.received_unfollowed_event?('alice')).to eq true
-    end
-
     @source.send_unfollow_event_to('bob', 'alice')
 
     eventually do
-      @source.send_unfollow_event_to('bob', 'alice')
+      expect(bob.received_unfollow_event?('alice')).to eq true
     end
   end
 
