@@ -20,8 +20,12 @@ describe 'Activity Broker' do
       send_event('1|B')
     end
 
-    def publish_follow_event(followed, follower)
+    def publish_new_follower(followed, follower)
       send_event('4327421|F|' + follower + '|' + followed)
+    end
+
+    def publish_status_update(from)
+      send_event('4327368|S|' + from)
     end
 
     def send_private_message_to(to, from)
@@ -110,6 +114,7 @@ describe 'Activity Broker' do
   class EventForwarder
     def initialize
       @subscribers = {}
+      @followers   = {}
     end
 
     def add_subscriber(client_id, message, subscriber_stream)
@@ -127,6 +132,8 @@ describe 'Activity Broker' do
 
     def process_follow_event(followed, follower, message, source_event_stream)
       puts 'forwarding follow event to ' + followed
+      @followers[followed] ||= []
+      @followers[followed] << follower
       @subscribers[followed].deliver(message)
     end
 
@@ -135,8 +142,14 @@ describe 'Activity Broker' do
       @subscribers[followed].deliver(message)
     end
 
+    def process_status_update_event(from, message)
+      @followers[from].each do |subscriber_id|
+        @subscribers.fetch(subscriber_id).deliver(message)
+      end
+    end
+
     def process_private_message_event(to, from, message, source_event_stream)
-      @subscribers[to].deliver(message)
+      @subscribers.fetch(to).deliver(message)
     end
   end
 
@@ -156,6 +169,8 @@ describe 'Activity Broker' do
         @listener.process_unfollow_event(to, from, message, source_event_stream)
       elsif event == 'P'
         @listener.process_private_message_event(to, from, message, source_event_stream)
+      elsif event == 'S'
+        @listener.process_status_update_event(from, message)
       else
         @listener.add_subscriber(message, message, source_event_stream)
       end
@@ -401,7 +416,7 @@ describe 'Activity Broker' do
     alice = start_subscriber('alice', 4485)
 
     source.start
-    source.publish_follow_event('bob', 'alice')
+    source.publish_new_follower('bob', 'alice')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -417,14 +432,14 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_follow_event('bob', 'alice')
-    source.publish_follow_event('bob', 'robert')
+    source.publish_new_follower('bob', 'alice')
+    source.publish_new_follower('bob', 'robert')
 
-    source.publish_follow_event('alice', 'robert')
-    source.publish_follow_event('alice', 'bob')
+    source.publish_new_follower('alice', 'robert')
+    source.publish_new_follower('alice', 'bob')
 
-    source.publish_follow_event('robert', 'alice')
-    source.publish_follow_event('robert', 'bob')
+    source.publish_new_follower('robert', 'alice')
+    source.publish_new_follower('robert', 'bob')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -446,7 +461,7 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_follow_event('bob', 'alice')
+    source.publish_new_follower('bob', 'alice')
     source.send_unfollow_event_to('bob', 'alice')
 
     eventually do
@@ -466,6 +481,25 @@ describe 'Activity Broker' do
 
     eventually do
       expect(bob.received_private_message?('alice')).to eq true
+    end
+  end
+
+  specify 'Followers are notified of status update from other user' do
+    start_activity_broker
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    source.start
+
+    source.publish_new_follower('bob', 'alice')
+    source.publish_status_update('bob')
+    source.publish_new_follower('alice', 'bob')
+    source.publish_status_update('alice')
+
+    eventually do
+      expect(alice.received_status_update?('bob')).to eq true
+      expect(bob.received_status_update?('alice')).to eq true
     end
   end
 
