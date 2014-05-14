@@ -115,6 +115,7 @@ describe 'Activity Broker' do
     def add_subscriber(client_id, message, subscriber_stream)
       puts 'client_id_received ' + client_id
       @subscribers[client_id] = subscriber_stream
+      subscriber_stream.deliver('welcome')
     end
 
     def process_broadcast_event(event_id, message, source_event_stream)
@@ -311,22 +312,30 @@ describe 'Activity Broker' do
     end
 
     def received_broadcast_event?
-      received_event?('1|B')
+      received_message?('1|B')
     end
 
     def received_follow_event?(follower)
-      received_event?('4327421|F|' + follower + '|' + @client_id)
+      received_message?('4327421|F|' + follower + '|' + @client_id)
+    end
+
+    def received_status_update?(from)
+      received_message?('4327368|S|' + from)
     end
 
     def received_unfollow_event?(unfollower)
-      received_event?('4327361|U|' + unfollower + '|' + @client_id)
+      received_message?('4327361|U|' + unfollower + '|' + @client_id)
     end
 
     def received_private_message?(from)
-      received_event?('4327425|P|' + from + '|' + @client_id)
+      received_message?('4327425|P|' + from + '|' + @client_id)
     end
 
-    def received_event?(expected_event)
+    def received_joined_ack?
+      received_message?('welcome')
+    end
+
+    def received_message?(expected_event)
       return true if @events.include?(expected_event)
 
       read_ready, _, _ = IO.select([@connection], nil, nil, 0)
@@ -464,6 +473,7 @@ describe 'Activity Broker' do
     FakeSubscriber.new(id, 'localhost', port).tap do |s|
       s.start
       s.send_client_id
+      eventually { expect(s.received_joined_ack?).to eq true }
       @subscribers.push(s)
     end
   end
