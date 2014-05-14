@@ -16,27 +16,27 @@ describe 'Activity Broker' do
       @connection = Socket.tcp(@host, @port)
     end
 
-    def send_broadcast_event
-      send_event('1|B')
+    def publish_broadcast_event
+      publish_event('1|B')
     end
 
-    def publish_new_follower(followed, follower)
-      send_event('4327421|F|' + follower + '|' + followed)
+    def publish_new_follower_to(followed, follower)
+      publish_event('4327421|F|' + follower + '|' + followed)
     end
 
-    def publish_status_update(from)
-      send_event('4327368|S|' + from)
+    def publish_status_update_from(from)
+      publish_event('4327368|S|' + from)
     end
 
-    def send_private_message_to(to, from)
-      send_event('4327425|P|' + from + '|' + to)
+    def publish_private_message_to(to, from)
+      publish_event('4327425|P|' + from + '|' + to)
     end
 
-    def send_unfollow_event_to(unfollowed, unfollower)
-      send_event('4327361|U|' + unfollower + '|' + unfollowed)
+    def publish_unfollow_to(unfollowed, unfollower)
+      publish_event('4327361|U|' + unfollower + '|' + unfollowed)
     end
 
-    def send_event(message)
+    def publish_event(message)
       puts 'sending event' + message
       @connection.write(message)
       @connection.write(CRLF)
@@ -387,7 +387,7 @@ describe 'Activity Broker' do
     bob = start_subscriber('bob', 4485)
 
     source.start
-    source.send_broadcast_event
+    source.publish_broadcast_event
 
     eventually do
       expect(bob.received_broadcast_event?).to eq true
@@ -402,7 +402,7 @@ describe 'Activity Broker' do
     end
 
     source.start
-    source.send_broadcast_event
+    source.publish_broadcast_event
 
     eventually do
       expect(subscribers.all?(&:received_broadcast_event?)).to eq true
@@ -416,7 +416,7 @@ describe 'Activity Broker' do
     alice = start_subscriber('alice', 4485)
 
     source.start
-    source.publish_new_follower('bob', 'alice')
+    source.publish_new_follower_to('bob', 'alice')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -432,14 +432,14 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_new_follower('bob', 'alice')
-    source.publish_new_follower('bob', 'robert')
+    source.publish_new_follower_to('bob', 'alice')
+    source.publish_new_follower_to('bob', 'robert')
 
-    source.publish_new_follower('alice', 'robert')
-    source.publish_new_follower('alice', 'bob')
+    source.publish_new_follower_to('alice', 'robert')
+    source.publish_new_follower_to('alice', 'bob')
 
-    source.publish_new_follower('robert', 'alice')
-    source.publish_new_follower('robert', 'bob')
+    source.publish_new_follower_to('robert', 'alice')
+    source.publish_new_follower_to('robert', 'bob')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -461,8 +461,8 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_new_follower('bob', 'alice')
-    source.send_unfollow_event_to('bob', 'alice')
+    source.publish_new_follower_to('bob', 'alice')
+    source.publish_unfollow_to('bob', 'alice')
 
     eventually do
       expect(bob.received_unfollow_event?('alice')).to eq true
@@ -477,7 +477,7 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.send_private_message_to('bob', 'alice')
+    source.publish_private_message_to('bob', 'alice')
 
     eventually do
       expect(bob.received_private_message?('alice')).to eq true
@@ -492,10 +492,10 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_new_follower('bob', 'alice')
-    source.publish_status_update('bob')
-    source.publish_new_follower('alice', 'bob')
-    source.publish_status_update('alice')
+    source.publish_new_follower_to('bob', 'alice')
+    source.publish_status_update_from('bob')
+    source.publish_new_follower_to('alice', 'bob')
+    source.publish_status_update_from('alice')
 
     eventually do
       expect(alice.received_status_update?('bob')).to eq true
