@@ -20,7 +20,7 @@ describe 'Activity Broker' do
       send_event('1|B')
     end
 
-    def send_follow_event_to(followed, follower)
+    def publish_follow_event(followed, follower)
       send_event('4327421|F|' + follower + '|' + followed)
     end
 
@@ -392,7 +392,7 @@ describe 'Activity Broker' do
     alice = start_subscriber('alice', 4485)
 
     source.start
-    source.send_follow_event_to('bob', 'alice')
+    source.publish_follow_event('bob', 'alice')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -408,14 +408,14 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.send_follow_event_to('bob', 'alice')
-    source.send_follow_event_to('bob', 'robert')
+    source.publish_follow_event('bob', 'alice')
+    source.publish_follow_event('bob', 'robert')
 
-    source.send_follow_event_to('alice', 'robert')
-    source.send_follow_event_to('alice', 'bob')
+    source.publish_follow_event('alice', 'robert')
+    source.publish_follow_event('alice', 'bob')
 
-    source.send_follow_event_to('robert', 'alice')
-    source.send_follow_event_to('robert', 'bob')
+    source.publish_follow_event('robert', 'alice')
+    source.publish_follow_event('robert', 'bob')
 
     eventually do
       expect(bob.received_follow_event?('alice')).to eq true
@@ -429,7 +429,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Unfollowed notfication is forwarded to subscriber' do
+  specify 'Unfollowed notification is forwarded to subscriber' do
     start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
@@ -437,7 +437,7 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.send_follow_event_to('bob', 'alice')
+    source.publish_follow_event('bob', 'alice')
     source.send_unfollow_event_to('bob', 'alice')
 
     eventually do
