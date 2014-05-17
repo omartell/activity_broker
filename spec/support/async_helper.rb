@@ -1,6 +1,6 @@
 module AsyncHelper
   def eventually(options = {})
-    timeout = options[:timeout]   || 5
+    timeout = options[:timeout]   || 2
     interval = options[:interval] || 0.0001
     time_limit = Time.now + timeout
     loop do
