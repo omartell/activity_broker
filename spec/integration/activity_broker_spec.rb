@@ -50,14 +50,16 @@ describe 'Activity Broker' do
   class ApplicationRunner
     def initialize(config)
       @config = config
+      @event_loop = EventLoop.new
+    end
+
+    def listen
+      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop)
+      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop)
     end
 
     def start
-      event_loop = EventLoop.new
-      event_forwarder = EventForwarder.new
-
-      @event_source_server = Server.new(@config[:event_source_exchange_port], event_loop)
-      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], event_loop)
+      event_forwarder = EventForwarder.new(@config.fetch(:logger){ Logger.new })
 
       @event_source_server.accept_connections do |message_stream|
         message_stream.start_reading(MessageTranslator.new(event_forwarder))
@@ -68,7 +70,7 @@ describe 'Activity Broker' do
       end
 
       trap_signal
-      event_loop.start
+      @event_loop.start
     end
 
     def trap_signal
@@ -88,6 +90,7 @@ describe 'Activity Broker' do
     end
 
     def accept_connections(&connection_listener)
+      puts 'start accepting connections in server'
       @server = TCPServer.new(@port)
       @connection_listener = connection_listener
       @io_loop.register_read(self, :process_new_connection)
@@ -103,6 +106,8 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection = @server.accept_nonblock
+      add_connection(connection)
+      puts 'connection accepted on server ' + @connections.size.to_s
       @connection_listener.call(MessageStream.new(connection, @io_loop))
     end
 
@@ -112,13 +117,14 @@ describe 'Activity Broker' do
   end
 
   class EventForwarder
-    def initialize
+    def initialize(logger)
       @subscribers = {}
       @followers   = {}
+      @logger      = logger
     end
 
     def add_subscriber(client_id, message, subscriber_stream)
-      puts 'client_id_received ' + client_id
+      puts ' client_id_received ' + client_id
       @subscribers[client_id] = subscriber_stream
       subscriber_stream.deliver('welcome')
     end
@@ -269,8 +275,8 @@ describe 'Activity Broker' do
   end
 
   class Logger
-    def initialize(id)
-      @id = id
+    def initialize
+
     end
 
     def notify(event, *other)
@@ -300,7 +306,7 @@ describe 'Activity Broker' do
     end
 
     def log(message)
-      puts @id + ' | ' + message
+      puts Time.now.to_s + ' | ' + message
     end
   end
 
@@ -323,7 +329,7 @@ describe 'Activity Broker' do
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
-      puts 'sending client id ' + @client_id
+      puts 'writing client id ' + @client_id
     end
 
     def received_broadcast_event?
@@ -370,11 +376,14 @@ describe 'Activity Broker' do
 
   let!(:broker) do
     ApplicationRunner.new({ event_source_exchange_port: 4484,
-                            subscriber_exchange_port: 4485 })
+                            subscriber_exchange_port: 4485,
+                            logger: Logger.new }).tap do |a|
+      a.listen
+    end
   end
 
   let!(:source) do
-    FakeEventSource.new('localhost', 4484)
+    FakeEventSource.new('0.0.0.0', 4484)
   end
 
   def start_activity_broker
@@ -405,7 +414,9 @@ describe 'Activity Broker' do
     source.publish_broadcast_event
 
     eventually do
-      expect(subscribers.all?(&:received_broadcast_event?)).to eq true
+      subscribers.each do |s|
+        expect(s.received_broadcast_event?).to eq true
+      end
     end
   end
 
@@ -504,7 +515,7 @@ describe 'Activity Broker' do
   end
 
   def start_subscriber(id, port)
-    FakeSubscriber.new(id, 'localhost', port).tap do |s|
+    FakeSubscriber.new(id, '0.0.0.0', port).tap do |s|
       s.start
       s.send_client_id
       eventually { expect(s.received_joined_ack?).to eq true }
