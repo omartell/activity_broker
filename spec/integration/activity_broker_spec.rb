@@ -25,7 +25,7 @@ describe 'Activity Broker' do
     end
 
     def publish_status_update_from(from)
-      publish_event('4327368|S|' + from)
+      publish_event(event_id + '|S|' + from)
     end
 
     def publish_private_message_to(to, from)
@@ -37,9 +37,14 @@ describe 'Activity Broker' do
     end
 
     def publish_event(message)
-      puts 'sending event' + message
+      puts 'publishing event' + message
       @connection.write(message)
       @connection.write(CRLF)
+      message
+    end
+
+    def event_id
+      Random.rand(10000..20000).to_s
     end
 
     def stop
