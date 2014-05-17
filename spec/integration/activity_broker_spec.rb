@@ -120,6 +120,7 @@ describe 'Activity Broker' do
     def add_subscriber(client_id, message, subscriber_stream)
       puts 'client_id_received ' + client_id
       @subscribers[client_id] = subscriber_stream
+      subscriber_stream.deliver('welcome')
     end
 
     def process_broadcast_event(event_id, message, source_event_stream)
@@ -506,6 +507,7 @@ describe 'Activity Broker' do
     FakeSubscriber.new(id, 'localhost', port).tap do |s|
       s.start
       s.send_client_id
+      eventually { expect(s.received_joined_ack?).to eq true }
       @subscribers.push(s)
     end
   end
