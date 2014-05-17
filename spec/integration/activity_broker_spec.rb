@@ -145,12 +145,13 @@ describe 'Activity Broker' do
       puts 'forwarding follow event to ' + followed
       @followers[followed] ||= []
       @followers[followed] << follower
-      @subscribers[followed].deliver(message)
+      @subscribers.fetch(followed).deliver(message)
     end
 
     def process_unfollow_event(followed, follower, message, source_event_stream)
       puts 'forwarding unfollow event to ' + followed
       @subscribers[followed].deliver(message)
+      @followers[followed] = @followers[followed] - [follower]
     end
 
     def process_status_update_event(from, message)
@@ -245,7 +246,7 @@ describe 'Activity Broker' do
 
     def start
       loop do
-        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil, 0)
+        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil)
         ((ready_writing || []) + (ready_reading || [])).each(&:notify)
       end
     end
@@ -364,12 +365,13 @@ describe 'Activity Broker' do
     def received_message?(expected_event)
       return true if @events.include?(expected_event)
 
+      puts @client_id + ' waiting for ' + expected_event
       read_ready, _, _ = IO.select([@connection], nil, nil, 0)
       if read_ready
         buffer = read_ready.first.read_nonblock(4096)
-        buffer.split(CRLF).each do |e|
-          puts @client_id + ' got event: ' + e
-          @events << e
+        buffer.split(CRLF).each do |event|
+          puts @client_id + ' got event: ' + event
+          @events << event
         end
       end
     end
@@ -509,13 +511,36 @@ describe 'Activity Broker' do
     source.start
 
     source.publish_new_follower_to('bob', 'alice')
-    source.publish_status_update_from('bob')
+    bob_status = source.publish_status_update_from('bob')
     source.publish_new_follower_to('alice', 'bob')
-    source.publish_status_update_from('alice')
+    alice_status = source.publish_status_update_from('alice')
 
     eventually do
-      expect(alice.received_status_update?('bob')).to eq true
-      expect(bob.received_status_update?('alice')).to eq true
+      expect(alice.received_message?(bob_status)).to eq true
+      expect(bob.received_message?(alice_status)).to eq true
+    end
+  end
+
+  specify 'A subscriber no longer receive updates from a user after unfollowing' do
+    start_activity_broker
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    source.start
+
+    source.publish_new_follower_to('bob', 'alice')
+    status = source.publish_status_update_from('bob')
+
+    eventually do
+      expect(alice.received_message?(status)).to eq true
+    end
+
+    source.publish_unfollow_to('bob', 'alice')
+    status = source.publish_status_update_from('bob')
+
+    eventually do
+      expect(alice.received_message?(status)).to eq nil
     end
   end
 
