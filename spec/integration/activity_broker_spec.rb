@@ -321,7 +321,7 @@ describe 'Activity Broker' do
       @client_id = client_id
       @address   = address
       @port      = port
-      @events    = []
+      @notifications = []
     end
 
     def start
@@ -338,42 +338,24 @@ describe 'Activity Broker' do
       puts 'writing client id ' + @client_id
     end
 
-    def received_broadcast_event?
-      received_message?('1|B')
-    end
-
-    def received_follow_event?(follower)
-      received_message?('4327421|F|' + follower + '|' + @client_id)
-    end
-
-    def received_status_update?(from)
-      received_message?('4327368|S|' + from)
-    end
-
-    def received_unfollow_event?(unfollower)
-      received_message?('4327361|U|' + unfollower + '|' + @client_id)
-    end
-
-    def received_private_message?(from)
-      received_message?('4327425|P|' + from + '|' + @client_id)
+    def has_received_notification_of?(notification, *args)
+      notification = notification.to_s
+      if @notifications.include?(notification)
+        true
+      else
+        read_ready, _, _ = IO.select([@connection], nil, nil, 0)
+        if read_ready
+          buffer = read_ready.first.read_nonblock(4096)
+          buffer.split(CRLF).each do |notification|
+            puts @client_id + ' got notification: ' + notification
+            @notifications << notification
+          end
+        end
+      end
     end
 
     def received_joined_ack?
-      received_message?('welcome')
-    end
-
-    def received_message?(expected_event)
-      return true if @events.include?(expected_event)
-
-      puts @client_id + ' waiting for ' + expected_event
-      read_ready, _, _ = IO.select([@connection], nil, nil, 0)
-      if read_ready
-        buffer = read_ready.first.read_nonblock(4096)
-        buffer.split(CRLF).each do |event|
-          puts @client_id + ' got event: ' + event
-          @events << event
-        end
-      end
+      has_received_notification_of?('welcome')
     end
 
     def stop
@@ -403,14 +385,15 @@ describe 'Activity Broker' do
     bob = start_subscriber('bob', 4485)
 
     source.start
-    source.publish_broadcast_event
+
+    broadcast = source.publish_broadcast_event
 
     eventually do
-      expect(bob.received_broadcast_event?).to eq true
+      expect(bob).to have_received_notification_of(broadcast)
     end
   end
 
-  specify 'A couple of subscribers are notified of broadcast event' do
+  specify 'Multiple subscribers are notified of broadcast event' do
     start_activity_broker
 
     subscribers = 10.times.map do |id|
@@ -418,30 +401,32 @@ describe 'Activity Broker' do
     end
 
     source.start
-    source.publish_broadcast_event
+
+    broadcast = source.publish_broadcast_event
 
     eventually do
-      subscribers.each do |s|
-        expect(s.received_broadcast_event?).to eq true
+      subscribers.each do |subscriber|
+        expect(subscriber).to have_received_notification_of(broadcast)
       end
     end
   end
 
-  specify 'Subscriber receives followed event after event source sends follow notification' do
+  specify 'A subscriber is notified of new follower' do
     start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
     source.start
-    source.publish_new_follower_to('bob', 'alice')
+
+    new_follower = source.publish_new_follower_to('bob', 'alice')
 
     eventually do
-      expect(bob.received_follow_event?('alice')).to eq true
+      expect(bob).to have_received_notification_of(new_follower)
     end
   end
 
-  specify 'Multiple followed events notifications are sent to followed subscribers' do
+  specify 'Multiple subscribers are notified of new followers' do
     start_activity_broker
 
     bob     = start_subscriber('bob', 4485)
@@ -450,24 +435,24 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_new_follower_to('bob', 'alice')
-    source.publish_new_follower_to('bob', 'robert')
+    alice_following_bob  = source.publish_new_follower_to('bob', 'alice')
+    robert_following_bob = source.publish_new_follower_to('bob', 'robert')
 
-    source.publish_new_follower_to('alice', 'robert')
-    source.publish_new_follower_to('alice', 'bob')
+    robert_following_alice = source.publish_new_follower_to('alice', 'robert')
+    bob_following_alice    = source.publish_new_follower_to('alice', 'bob')
 
-    source.publish_new_follower_to('robert', 'alice')
-    source.publish_new_follower_to('robert', 'bob')
+    alice_following_robert = source.publish_new_follower_to('robert', 'alice')
+    bob_following_robert   = source.publish_new_follower_to('robert', 'bob')
 
     eventually do
-      expect(bob.received_follow_event?('alice')).to eq true
-      expect(bob.received_follow_event?('robert')).to eq true
+      expect(bob).to have_received_notification_of(alice_following_bob)
+      expect(bob).to have_received_notification_of(robert_following_bob)
 
-      expect(alice.received_follow_event?('bob')).to eq true
-      expect(alice.received_follow_event?('robert')).to eq true
+      expect(alice).to have_received_notification_of(robert_following_alice)
+      expect(alice).to have_received_notification_of(bob_following_alice)
 
-      expect(robert.received_follow_event?('bob')).to eq true
-      expect(robert.received_follow_event?('alice')).to eq true
+      expect(robert).to have_received_notification_of(alice_following_robert)
+      expect(robert).to have_received_notification_of(bob_following_robert)
     end
   end
 
@@ -480,14 +465,15 @@ describe 'Activity Broker' do
     source.start
 
     source.publish_new_follower_to('bob', 'alice')
-    source.publish_unfollow_to('bob', 'alice')
+
+    alice_unfollowed_bob = source.publish_unfollow_to('bob', 'alice')
 
     eventually do
-      expect(bob.received_unfollow_event?('alice')).to eq true
+      expect(bob).to have_received_notification_of(alice_unfollowed_bob)
     end
   end
 
-  specify 'Subscriber is notified of private message' do
+  specify 'Subscriber is notified of a private message' do
     start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
@@ -495,14 +481,14 @@ describe 'Activity Broker' do
 
     source.start
 
-    source.publish_private_message_to('bob', 'alice')
+    private_message = source.publish_private_message_to('bob', 'alice')
 
     eventually do
-      expect(bob.received_private_message?('alice')).to eq true
+      expect(bob).to have_received_notification_of(private_message)
     end
   end
 
-  specify 'Followers are notified of status update from other user' do
+  specify 'Followers are notified of status updates from the users they follow' do
     start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
@@ -511,13 +497,14 @@ describe 'Activity Broker' do
     source.start
 
     source.publish_new_follower_to('bob', 'alice')
-    bob_status = source.publish_status_update_from('bob')
+    bob_status_update = source.publish_status_update_from('bob')
+
     source.publish_new_follower_to('alice', 'bob')
-    alice_status = source.publish_status_update_from('alice')
+    alice_status_update = source.publish_status_update_from('alice')
 
     eventually do
-      expect(alice.received_message?(bob_status)).to eq true
-      expect(bob.received_message?(alice_status)).to eq true
+      expect(alice).to have_received_notification_of(bob_status_update)
+      expect(bob).to have_received_notification_of(alice_status_update)
     end
   end
 
@@ -530,17 +517,17 @@ describe 'Activity Broker' do
     source.start
 
     source.publish_new_follower_to('bob', 'alice')
-    status = source.publish_status_update_from('bob')
+    bob_status_update = source.publish_status_update_from('bob')
 
     eventually do
-      expect(alice.received_message?(status)).to eq true
+      expect(alice).to have_received_notification_of(bob_status_update)
     end
 
     source.publish_unfollow_to('bob', 'alice')
-    status = source.publish_status_update_from('bob')
+    new_bob_status_update = source.publish_status_update_from('bob')
 
     eventually do
-      expect(alice.received_message?(status)).to eq nil
+      expect(alice).not_to have_received_notification_of(new_bob_status_update)
     end
   end
 
