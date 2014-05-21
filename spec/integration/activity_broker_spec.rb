@@ -16,31 +16,32 @@ describe 'Activity Broker' do
       @connection = Socket.tcp(@host, @port)
     end
 
-    def publish_broadcast_event
-      publish_event('1|B')
+    def publish_broadcast_event(options = {})
+      publish_event('|B', options)
     end
 
-    def publish_new_follower_to(followed, follower)
-      publish_event('4327421|F|' + follower + '|' + followed)
+    def publish_new_follower_to(followed, follower, options = {})
+      publish_event('|F|' + follower + '|' + followed, options)
     end
 
-    def publish_status_update_from(from)
-      publish_event(event_id + '|S|' + from)
+    def publish_status_update_from(from, options = {})
+      publish_event('|S|' + from, options)
     end
 
-    def publish_private_message_to(to, from)
-      publish_event('4327425|P|' + from + '|' + to)
+    def publish_private_message_to(to, from, options = {})
+      publish_event('|P|' + from + '|' + to, options)
     end
 
-    def publish_unfollow_to(unfollowed, unfollower)
-      publish_event('4327361|U|' + unfollower + '|' + unfollowed)
+    def publish_unfollow_to(unfollowed, unfollower, options = {})
+      publish_event('|U|' + unfollower + '|' + unfollowed)
     end
 
-    def publish_event(message)
-      puts 'publishing event' + message
-      @connection.write(message)
+    def publish_event(message, options = {})
+      full_message = options.fetch(:id, event_id).to_s + message
+      puts 'publishing event: ' + full_message
+      @connection.write(full_message)
       @connection.write(CRLF)
-      message
+      full_message
     end
 
     def event_id
