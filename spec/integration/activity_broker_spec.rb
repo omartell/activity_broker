@@ -68,11 +68,11 @@ describe 'Activity Broker' do
       event_forwarder = EventForwarder.new(@config.fetch(:logger){ Logger.new })
 
       @event_source_server.accept_connections do |message_stream|
-        message_stream.start_reading(MessageTranslator.new(event_forwarder))
+        message_stream.start_reading(EventSourceMessageUnpacker.new(NotificationTranslator.new(event_forwarder)))
       end
 
       @subscriber_server.accept_connections do |message_stream|
-        message_stream.start_reading(MessageTranslator.new(event_forwarder))
+        message_stream.start_reading(SubscriberMessageTranslator.new(event_forwarder))
       end
 
       trap_signal
@@ -129,63 +129,83 @@ describe 'Activity Broker' do
       @logger      = logger
     end
 
-    def add_subscriber(client_id, message, subscriber_stream)
-      puts ' client_id_received ' + client_id
+    def add_subscriber(client_id, subscriber_stream)
+      puts 'client_id_received ' + client_id
       @subscribers[client_id] = subscriber_stream
       subscriber_stream.deliver('welcome')
     end
 
-    def process_broadcast_event(event_id, message, source_event_stream)
-      puts 'forwarding broadcast ' + event_id.to_s + @subscribers.size.to_s
+    def process_broadcast_event(notification)
+      puts 'forwarding broadcast ' + notification.id.to_s + @subscribers.size.to_s
       @subscribers.each do |client_id, subscriber_stream|
-        subscriber_stream.deliver(message)
+        subscriber_stream.deliver(notification.message)
       end
     end
 
-    def process_follow_event(followed, follower, message, source_event_stream)
-      puts 'forwarding follow event to ' + followed
-      @followers[followed] ||= []
-      @followers[followed] << follower
-      @subscribers.fetch(followed).deliver(message)
+    def process_follow_event(notification)
+      puts 'forwarding follow event to ' + notification.to
+      @followers[notification.to] ||= []
+      @followers[notification.to] << notification.from
+      @subscribers.fetch(notification.to).deliver(notification.message)
     end
 
-    def process_unfollow_event(followed, follower, message, source_event_stream)
-      puts 'forwarding unfollow event to ' + followed
-      @subscribers[followed].deliver(message)
-      @followers[followed] = @followers[followed] - [follower]
+    def process_unfollow_event(notification)
+      puts 'forwarding unfollow event to ' + notification.to
+      @subscribers[notificaiton.to].deliver(notification.message)
+      @followers[notification.to] = @followers[notification.to] - [notification.from]
     end
 
-    def process_status_update_event(from, message)
-      @followers[from].each do |subscriber_id|
-        @subscribers.fetch(subscriber_id).deliver(message)
+    def process_status_update_event(notification)
+      @followers.fetch(notification.from).each do |subscriber_id|
+        @subscribers.fetch(subscriber_id).deliver(notification.message)
       end
     end
 
-    def process_private_message_event(to, from, message, source_event_stream)
-      @subscribers.fetch(to).deliver(message)
+    def process_private_message_event(notification)
+      @subscribers.fetch(notification.to).deliver(notification.message)
     end
   end
 
-  class MessageTranslator
+  Notification = Struct.new(:id, :type_id, :from, :to, :message)
+
+  class EventSourceMessageUnpacker
     def initialize(listener)
       @listener = listener
     end
 
     def process_message(message, source_event_stream)
       id, event, from, to = message.split('|')
+      @listener.process_notification(Notification.new(id, event, from, to, message))
+    end
+  end
 
-      if event == 'B'
-        @listener.process_broadcast_event(message, message, source_event_stream)
-      elsif event == 'F'
-        @listener.process_follow_event(to, from, message, source_event_stream)
-      elsif event == 'U'
-        @listener.process_unfollow_event(to, from, message, source_event_stream)
-      elsif event == 'P'
-        @listener.process_private_message_event(to, from, message, source_event_stream)
-      elsif event == 'S'
-        @listener.process_status_update_event(from, message)
-      else
-        @listener.add_subscriber(message, message, source_event_stream)
+  class SubscriberMessageTranslator
+    def initialize(listener)
+      @listener = listener
+    end
+
+    def process_message(message, subscriber_stream)
+      @listener.add_subscriber(message, subscriber_stream)
+    end
+  end
+
+  class NotificationTranslator
+    def initialize(listener)
+      @listener = listener
+      @last_event = []
+    end
+
+    def process_notification(notification)
+      if notification.type_id == 'B'
+        @listener.process_broadcast_event(notification)
+      elsif notification.type_id == 'F'
+        @listener.process_follow_event(notification)
+      elsif notification.type_id == 'U'
+        @listener.process_unfollow_event(notification)
+      elsif notification.type_id == 'P'
+        @listener.process_private_message_event(notification)
+      elsif notification.type_id == 'S'
+        @listener.process_status_update_event(notification)
       end
     end
   end
