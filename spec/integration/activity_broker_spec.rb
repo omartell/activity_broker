@@ -10,6 +10,7 @@ describe 'Activity Broker' do
     def initialize(host, port)
       @host = host
       @port = port
+      @event_id = 0
     end
 
     def start
@@ -45,7 +46,7 @@ describe 'Activity Broker' do
     end
 
     def event_id
-      Random.rand(10000..20000).to_s
+      @event_id += 1
     end
 
     def stop
@@ -68,7 +69,8 @@ describe 'Activity Broker' do
       event_forwarder = EventForwarder.new(@config.fetch(:logger){ Logger.new })
 
       @event_source_server.accept_connections do |message_stream|
-        message_stream.start_reading(EventSourceMessageUnpacker.new(NotificationTranslator.new(event_forwarder)))
+        unpacker = EventSourceMessageUnpacker.new(NotificationOrdering.new(NotificationTranslator.new(event_forwarder)))
+        message_stream.start_reading(unpacker)
       end
 
       @subscriber_server.accept_connections do |message_stream|
@@ -151,7 +153,7 @@ describe 'Activity Broker' do
 
     def process_unfollow_event(notification)
       puts 'forwarding unfollow event to ' + notification.to
-      @subscribers[notificaiton.to].deliver(notification.message)
+      @subscribers[notification.to].deliver(notification.message)
       @followers[notification.to] = @followers[notification.to] - [notification.from]
     end
 
@@ -174,8 +176,48 @@ describe 'Activity Broker' do
     end
 
     def process_message(message, source_event_stream)
-      id, event, from, to = message.split('|')
-      @listener.process_notification(Notification.new(id, event, from, to, message))
+      id, type_id, from, to = message.split('|')
+      notification = Notification.new(id.to_i, type_id, from, to, message)
+      @listener.process_notification(notification)
+    end
+  end
+
+  class NotificationOrdering
+    def initialize(listener)
+      @listener = listener
+      @last_notification = nil
+      @notification_queue = []
+    end
+
+    def process_notification(current_notification)
+      if is_this_the_next_notification?(current_notification)
+        forward_notification(current_notification)
+        @notification_queue.sort! { |x, y| y.id <=> x.id }
+        process_queued_notifications
+      else
+        @notification_queue << current_notification
+      end
+    end
+
+    private
+
+    def process_queued_notifications
+      notification = @notification_queue.shift
+      if notification && is_this_the_next_notification?(notification)
+        forward_notification(notification)
+        process_queued_notifications
+      elsif notification
+        @notification_queue.unshift(notification)
+      end
+    end
+
+    def forward_notification(notification)
+      @listener.process_notification(notification)
+      @last_notification = notification
+    end
+
+    def is_this_the_next_notification?(notification)
+      @last_notification.nil? || (notification.id - @last_notification.id) == 1
     end
   end
 
@@ -549,6 +591,33 @@ describe 'Activity Broker' do
 
     eventually do
       expect(alice).not_to have_received_notification_of(new_bob_status_update)
+    end
+  end
+
+  specify 'Subscribers receive notifications in order' do
+    start_activity_broker
+
+    bob   = start_subscriber('bob', 4485)
+    alice = start_subscriber('alice', 4485)
+
+    source.start
+
+    robert_following_alice = source.publish_new_follower_to('alice', 'robert', id: 1)
+    alice_following_bob = source.publish_new_follower_to('bob', 'alice', id: 2)
+    newer_bob_status_update = source.publish_status_update_from('bob', id: 4)
+    bob_status_update       = source.publish_status_update_from('bob', id: 3)
+
+    eventually do
+      expect(alice).to have_received_notification_of(robert_following_alice)
+      expect(bob).to have_received_notification_of(alice_following_bob)
+    end
+
+    eventually do
+      expect(alice).to have_received_notification_of(bob_status_update)
+    end
+
+    eventually do
+      expect(alice).to have_received_notification_of(newer_bob_status_update)
     end
   end
 
