@@ -21,20 +21,20 @@ describe 'Activity Broker' do
       publish_event('|B', options)
     end
 
-    def publish_new_follower_to(followed, follower, options = {})
-      publish_event('|F|' + follower + '|' + followed, options)
+    def publish_new_follower_to(recipient, sender, options = {})
+      publish_event('|F|' + sender + '|' + recipient, options)
     end
 
-    def publish_status_update_from(from, options = {})
-      publish_event('|S|' + from, options)
+    def publish_status_update_from(sender, options = {})
+      publish_event('|S|' + sender, options)
     end
 
-    def publish_private_message_to(to, from, options = {})
-      publish_event('|P|' + from + '|' + to, options)
+    def publish_private_message_to(recipient, sender, options = {})
+      publish_event('|P|' + sender + '|' + recipient, options)
     end
 
-    def publish_unfollow_to(unfollowed, unfollower, options = {})
-      publish_event('|U|' + unfollower + '|' + unfollowed)
+    def publish_unfollow_to(recipient, sender, options = {})
+      publish_event('|U|' + sender + '|' + recipient)
     end
 
     def publish_event(message, options = {})
@@ -69,7 +69,8 @@ describe 'Activity Broker' do
       event_forwarder = EventForwarder.new(@config.fetch(:logger){ Logger.new })
 
       @event_source_server.accept_connections do |message_stream|
-        unpacker = EventSourceMessageUnpacker.new(NotificationOrdering.new(NotificationTranslator.new(event_forwarder)))
+        translator = NotificationTranslator.new(event_forwarder)
+        unpacker   = EventSourceMessageUnpacker.new(NotificationOrdering.new(translator))
         message_stream.start_reading(unpacker)
       end
 
@@ -92,7 +93,6 @@ describe 'Activity Broker' do
 
   class Server
     def initialize(port, io_loop)
-      @connections = []
       @port = port
       @io_loop = io_loop
     end
@@ -114,13 +114,8 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection = @server.accept_nonblock
-      add_connection(connection)
-      puts 'connection accepted on server ' + @connections.size.to_s
+      puts 'connection accepted on server'
       @connection_listener.call(MessageStream.new(connection, @io_loop))
-    end
-
-    def add_connection(c)
-      @connections << c
     end
   end
 
@@ -145,30 +140,30 @@ describe 'Activity Broker' do
     end
 
     def process_follow_event(notification)
-      puts 'forwarding follow event to ' + notification.to
-      @followers[notification.to] ||= []
-      @followers[notification.to] << notification.from
-      @subscribers.fetch(notification.to).deliver(notification.message)
+      puts 'forwarding follow event to ' + notification.recipient
+      @followers[notification.recipient] ||= []
+      @followers[notification.recipient] << notification.sender
+      @subscribers.fetch(notification.recipient).deliver(notification.message)
     end
 
     def process_unfollow_event(notification)
-      puts 'forwarding unfollow event to ' + notification.to
-      @subscribers[notification.to].deliver(notification.message)
-      @followers[notification.to] = @followers[notification.to] - [notification.from]
+      puts 'forwarding unfollow event recipient ' + notification.recipient
+      @subscribers[notification.recipient].deliver(notification.message)
+      @followers[notification.recipient] = @followers[notification.recipient] - [notification.sender]
     end
 
     def process_status_update_event(notification)
-      @followers.fetch(notification.from).each do |subscriber_id|
+      @followers.fetch(notification.sender).each do |subscriber_id|
         @subscribers.fetch(subscriber_id).deliver(notification.message)
       end
     end
 
     def process_private_message_event(notification)
-      @subscribers.fetch(notification.to).deliver(notification.message)
+      @subscribers.fetch(notification.recipient).deliver(notification.message)
     end
   end
 
-  Notification = Struct.new(:id, :type_id, :from, :to, :message)
+  Notification = Struct.new(:id, :type_id, :sender, :recipient, :message)
 
   class EventSourceMessageUnpacker
     def initialize(listener)
@@ -176,8 +171,8 @@ describe 'Activity Broker' do
     end
 
     def process_message(message, source_event_stream)
-      id, type_id, from, to = message.split('|')
-      notification = Notification.new(id.to_i, type_id, from, to, message)
+      id, type_id, sender, recipient = message.split('|')
+      notification = Notification.new(id.to_i, type_id, sender, recipient, message)
       @listener.process_notification(notification)
     end
   end
@@ -216,8 +211,8 @@ describe 'Activity Broker' do
       @last_notification = notification
     end
 
-    def is_this_the_next_notification?(notification)
-      @last_notification.nil? || (notification.id - @last_notification.id) == 1
+    def is_this_the_next_notification?(next_notification)
+      @last_notification.nil? || (next_notification.id - @last_notification.id) == 1
     end
   end
 
