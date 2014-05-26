@@ -66,7 +66,7 @@ describe 'Activity Broker' do
     end
 
     def start
-      event_forwarder = EventForwarder.new(@config.fetch(:logger){ Logger.new })
+      event_forwarder = NotificationForwarder.new(@config.fetch(:logger){ Logger.new }, NotificationDelivery.new)
 
       @event_source_server.accept_connections do |message_stream|
         translator = NotificationTranslator.new(event_forwarder)
@@ -119,47 +119,76 @@ describe 'Activity Broker' do
     end
   end
 
-  class EventForwarder
-    def initialize(logger)
+  class NotificationDelivery
+    def initialize
       @subscribers = {}
-      @followers   = {}
-      @logger      = logger
     end
 
-    def add_subscriber(client_id, subscriber_stream)
-      puts 'client_id_received ' + client_id
-      @subscribers[client_id] = subscriber_stream
-      subscriber_stream.deliver('welcome')
+    def add_subscriber(subscriber_id, subscriber_stream)
+      @subscribers[subscriber_id] = subscriber_stream
+    end
+
+    def deliver_message_to(recipient, message)
+      @subscribers.fetch(recipient).write(message)
+    end
+
+    def deliver_message_to_everyone(message)
+      @subscribers.each do |subscriber_id, subscriber_stream|
+        subscriber_stream.write(message)
+      end
+    end
+  end
+
+  class NotificationForwarder
+    def initialize(logger, notification_delivery)
+      @followers   = Hash.new{ |hash, key| hash[key] = [] }
+      @delivery = notification_delivery
+      @logger = logger
+    end
+
+    def register_subscriber(subscriber_id, subscriber_stream)
+      puts 'client_id_received ' + subscriber_id
+      delivery.add_subscriber(subscriber_id, subscriber_stream)
+      delivery.deliver_message_to(subscriber_id, 'welcome')
     end
 
     def process_broadcast_event(notification)
-      puts 'forwarding broadcast ' + notification.id.to_s + @subscribers.size.to_s
-      @subscribers.each do |client_id, subscriber_stream|
-        subscriber_stream.deliver(notification.message)
-      end
+      puts 'forwarding broadcast ' + notification.id.to_s
+      delivery.deliver_message_to_everyone(notification.message)
     end
 
     def process_follow_event(notification)
       puts 'forwarding follow event to ' + notification.recipient
-      @followers[notification.recipient] ||= []
-      @followers[notification.recipient] << notification.sender
-      @subscribers.fetch(notification.recipient).deliver(notification.message)
+      add_follower(notification.sender, notification.recipient)
+      delivery.deliver_message_to(notification.recipient, notification.message)
     end
 
     def process_unfollow_event(notification)
       puts 'forwarding unfollow event recipient ' + notification.recipient
-      @subscribers[notification.recipient].deliver(notification.message)
-      @followers[notification.recipient] = @followers[notification.recipient] - [notification.sender]
+      remove_follower(notification.sender, notification.recipient)
+      delivery.deliver_message_to(notification.recipient, notification.message)
     end
 
     def process_status_update_event(notification)
-      @followers.fetch(notification.sender).each do |subscriber_id|
-        @subscribers.fetch(subscriber_id).deliver(notification.message)
+      @followers.fetch(notification.sender).each do |follower|
+        delivery.deliver_message_to(follower, notification.message)
       end
     end
 
     def process_private_message_event(notification)
-      @subscribers.fetch(notification.recipient).deliver(notification.message)
+      delivery.deliver_message_to(notification.recipient, notification.message)
+    end
+
+    private
+
+    attr_reader :delivery
+
+    def remove_follower(follower, followed)
+      @followers[followed] = @followers[followed] - [follower]
+    end
+
+    def add_follower(follower, followed)
+      @followers[followed] << follower
     end
   end
 
@@ -222,7 +251,7 @@ describe 'Activity Broker' do
     end
 
     def process_message(message, subscriber_stream)
-      @listener.add_subscriber(message, subscriber_stream)
+      @listener.register_subscriber(message, subscriber_stream)
     end
   end
 
@@ -275,7 +304,7 @@ describe 'Activity Broker' do
       end
     end
 
-    def deliver(message)
+    def write(message)
       puts 'delivering ' + message
       @io.write(message)
       @io.write(CRLF)
