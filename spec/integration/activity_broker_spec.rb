@@ -163,7 +163,7 @@ describe 'Activity Broker' do
     end
   end
 
-  Notification = Struct.new(:id, :type_id, :sender, :recipient, :message)
+  EventNotification = Struct.new(:id, :type, :sender, :recipient, :message)
 
   class EventSourceMessageUnpacker
     def initialize(listener)
@@ -171,8 +171,8 @@ describe 'Activity Broker' do
     end
 
     def process_message(message, source_event_stream)
-      id, type_id, sender, recipient = message.split('|')
-      notification = Notification.new(id.to_i, type_id, sender, recipient, message)
+      id, type, sender, recipient = message.split('|')
+      notification = EventNotification.new(id.to_i, type, sender, recipient, message)
       @listener.process_notification(notification)
     end
   end
@@ -229,19 +229,19 @@ describe 'Activity Broker' do
   class NotificationTranslator
     def initialize(listener)
       @listener = listener
-      @last_event = []
     end
 
     def process_notification(notification)
-      if notification.type_id == 'B'
+      case notification.type
+      when 'B'
         @listener.process_broadcast_event(notification)
-      elsif notification.type_id == 'F'
+      when 'F'
         @listener.process_follow_event(notification)
-      elsif notification.type_id == 'U'
+      when 'U'
         @listener.process_unfollow_event(notification)
-      elsif notification.type_id == 'P'
+      when 'P'
         @listener.process_private_message_event(notification)
-      elsif notification.type_id == 'S'
+      when 'S'
         @listener.process_status_update_event(notification)
       end
     end
