@@ -66,16 +66,16 @@ describe 'Activity Broker' do
     end
 
     def start
-      event_forwarder = NotificationForwarder.new(@config.fetch(:logger){ Logger.new }, NotificationDelivery.new)
+      forwarder = NotificationForwarder.new(@config.fetch(:logger){ Logger.new }, NotificationDelivery.new)
 
       @event_source_server.accept_connections do |message_stream|
-        translator = NotificationTranslator.new(event_forwarder)
+        translator = NotificationTranslator.new(forwarder)
         unpacker   = EventSourceMessageUnpacker.new(NotificationOrdering.new(translator))
         message_stream.start_reading(unpacker)
       end
 
       @subscriber_server.accept_connections do |message_stream|
-        message_stream.start_reading(SubscriberMessageTranslator.new(event_forwarder))
+        message_stream.start_reading(SubscriberMessageTranslator.new(forwarder))
       end
 
       trap_signal
@@ -141,7 +141,7 @@ describe 'Activity Broker' do
 
   class NotificationForwarder
     def initialize(logger, notification_delivery)
-      @followers   = Hash.new{ |hash, key| hash[key] = [] }
+      @followers = Hash.new { |hash, key| hash[key] = [] }
       @delivery = notification_delivery
       @logger = logger
     end
@@ -618,7 +618,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Subscribers receive notifications in order' do
+  specify 'Subscribers receive event notifications in order' do
     start_activity_broker
 
     bob   = start_subscriber('bob', 4485)
@@ -629,12 +629,13 @@ describe 'Activity Broker' do
     robert_following_alice = source.publish_new_follower_to('alice', 'robert', id: 1)
     alice_following_bob = source.publish_new_follower_to('bob', 'alice', id: 2)
     newer_bob_status_update = source.publish_status_update_from('bob', id: 4)
-    bob_status_update       = source.publish_status_update_from('bob', id: 3)
 
     eventually do
       expect(alice).to have_received_notification_of(robert_following_alice)
       expect(bob).to have_received_notification_of(alice_following_bob)
     end
+
+    bob_status_update = source.publish_status_update_from('bob', id: 3)
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
