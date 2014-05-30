@@ -129,7 +129,9 @@ describe 'Activity Broker' do
     end
 
     def deliver_message_to(recipient, message)
-      @subscribers.fetch(recipient).write(message)
+      if subscriber = @subscribers[recipient]
+        subscriber.write(message)
+      end
     end
 
     def deliver_message_to_everyone(message)
@@ -643,6 +645,21 @@ describe 'Activity Broker' do
 
     eventually do
       expect(alice).to have_received_notification_of(newer_bob_status_update)
+    end
+  end
+
+  specify 'Event notifications are ignored if subscriber is not connected' do
+    start_activity_broker
+
+    bob = start_subscriber('bob', 4485)
+
+    source.start
+
+    alice_following_bob = source.publish_new_follower_to('bob', 'alice', id: 1)
+    robert_following_alice = source.publish_new_follower_to('alice', 'robert', id: 2)
+
+    eventually do
+      expect(bob).to have_received_notification_of(alice_following_bob)
     end
   end
 
