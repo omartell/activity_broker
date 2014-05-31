@@ -58,6 +58,7 @@ describe 'Activity Broker' do
     def initialize(config)
       @config = config
       @event_loop = EventLoop.new
+      @logger = @config.fetch(:logger){ Logger.new }
     end
 
     def listen
@@ -66,16 +67,18 @@ describe 'Activity Broker' do
     end
 
     def start
-      forwarder = NotificationForwarder.new(@config.fetch(:logger){ Logger.new }, NotificationDelivery.new)
+      forwarder = NotificationForwarder.new(@logger, NotificationDelivery.new)
+      event_notification_translator = NotificationTranslator.new(forwarder)
+      ordering = NotificationOrdering.new(event_notification_translator)
+      unpacker = EventSourceMessageUnpacker.new(ordering)
 
       @event_source_server.accept_connections do |message_stream|
-        translator = NotificationTranslator.new(forwarder)
-        unpacker   = EventSourceMessageUnpacker.new(NotificationOrdering.new(translator))
-        message_stream.start_reading(unpacker)
+        message_stream.read(unpacker)
       end
 
+      subscriber_translator = SubscriberMessageTranslator.new(forwarder)
       @subscriber_server.accept_connections do |message_stream|
-        message_stream.start_reading(SubscriberMessageTranslator.new(forwarder))
+        message_stream.read(subscriber_translator)
       end
 
       trap_signal
@@ -285,7 +288,7 @@ describe 'Activity Broker' do
       @read_buffer = ''
     end
 
-    def start_reading(message_listener)
+    def read(message_listener)
       @message_listener = message_listener
       @io_loop.register_read(self, :data_received)
     end
@@ -307,7 +310,6 @@ describe 'Activity Broker' do
     end
 
     def write(message)
-      puts 'delivering ' + message
       @io.write(message)
       @io.write(CRLF)
     end
