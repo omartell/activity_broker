@@ -1,16 +1,19 @@
 require 'spec_helper'
 require 'support/async_helper'
 require 'socket'
+require 'logger'
+require 'delegate'
 
 describe 'Activity Broker' do
   include AsyncHelper
   CRLF = '/r/n'
 
   class FakeEventSource
-    def initialize(host, port)
+    def initialize(host, port, logger)
       @host = host
       @port = port
       @event_id = 0
+      @logger = logger
     end
 
     def start
@@ -37,20 +40,22 @@ describe 'Activity Broker' do
       publish_event('|U|' + sender + '|' + recipient)
     end
 
-    def publish_event(message, options = {})
-      full_message = options.fetch(:id, event_id).to_s + message
-      puts 'publishing event: ' + full_message
+    def publish_event(event, options = {})
+      full_message = options.fetch(:id, event_id).to_s + event
+      @logger.notify(:publishing_event, full_message)
       @connection.write(full_message)
       @connection.write(CRLF)
       full_message
     end
 
-    def event_id
-      @event_id += 1
-    end
-
     def stop
       @connection.close
+    end
+
+    private
+
+    def event_id
+      @event_id += 1
     end
   end
 
@@ -58,16 +63,16 @@ describe 'Activity Broker' do
     def initialize(config)
       @config = config
       @event_loop = EventLoop.new
-      @logger = @config.fetch(:logger){ Logger.new }
+      @logger = @config.fetch(:logger){ ApplicationLogger.new }
     end
 
     def listen
-      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop)
-      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop)
+      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop, @logger)
+      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop, @logger)
     end
 
     def start
-      forwarder = NotificationForwarder.new(@logger, NotificationDelivery.new)
+      forwarder = NotificationForwarder.new(NotificationDelivery.new, @logger)
       event_notification_translator = NotificationTranslator.new(forwarder)
       ordering = NotificationOrdering.new(event_notification_translator)
       unpacker = EventSourceMessageUnpacker.new(ordering)
@@ -95,15 +100,16 @@ describe 'Activity Broker' do
   end
 
   class Server
-    def initialize(port, io_loop)
+    def initialize(port, io_loop, logger)
       @port = port
       @io_loop = io_loop
+      @logger = logger
     end
 
-    def accept_connections(&connection_listener)
-      puts 'start accepting connections in server'
+    def accept_connections(&connection_accepted_listener)
+      @logger.notify(:server_accepting_connections, @port)
       @server = TCPServer.new(@port)
-      @connection_listener = connection_listener
+      @connection_accepted_listener = connection_accepted_listener
       @io_loop.register_read(self, :process_new_connection)
     end
 
@@ -117,8 +123,8 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection = @server.accept_nonblock
-      puts 'connection accepted on server'
-      @connection_listener.call(MessageStream.new(connection, @io_loop))
+      @logger.notify(:connection_accepted, @port)
+      @connection_accepted_listener.call(MessageStream.new(connection, @io_loop, @logger))
     end
   end
 
@@ -145,48 +151,48 @@ describe 'Activity Broker' do
   end
 
   class NotificationForwarder
-    def initialize(logger, notification_delivery)
+    def initialize(notification_delivery, logger)
       @followers = Hash.new { |hash, key| hash[key] = [] }
       @delivery = notification_delivery
       @logger = logger
     end
 
     def register_subscriber(subscriber_id, subscriber_stream)
-      puts 'client_id_received ' + subscriber_id
-      delivery.add_subscriber(subscriber_id, subscriber_stream)
-      delivery.deliver_message_to(subscriber_id, 'welcome')
+      @delivery.add_subscriber(subscriber_id, subscriber_stream)
+      @delivery.deliver_message_to(subscriber_id, 'welcome')
+      @logger.notify(:registering_subscriber, subscriber_id)
     end
 
     def process_broadcast_event(notification)
-      puts 'forwarding broadcast ' + notification.id.to_s
-      delivery.deliver_message_to_everyone(notification.message)
+      @delivery.deliver_message_to_everyone(notification.message)
+      @logger.notify(:forwarding_broadcast_event, notification)
     end
 
     def process_follow_event(notification)
-      puts 'forwarding follow event to ' + notification.recipient
       add_follower(notification.sender, notification.recipient)
-      delivery.deliver_message_to(notification.recipient, notification.message)
+      @delivery.deliver_message_to(notification.recipient, notification.message)
+      @logger.notify(:forwarding_follow_event, notification)
     end
 
     def process_unfollow_event(notification)
-      puts 'forwarding unfollow event recipient ' + notification.recipient
       remove_follower(notification.sender, notification.recipient)
-      delivery.deliver_message_to(notification.recipient, notification.message)
+      @delivery.deliver_message_to(notification.recipient, notification.message)
+      @logger.notify(:forwarding_unfollow_event, notification)
     end
 
     def process_status_update_event(notification)
       @followers.fetch(notification.sender).each do |follower|
-        delivery.deliver_message_to(follower, notification.message)
+        @delivery.deliver_message_to(follower, notification.message)
       end
+      @logger.notify(:forwarding_unfollow_event, notification)
     end
 
     def process_private_message_event(notification)
-      delivery.deliver_message_to(notification.recipient, notification.message)
+      @delivery.deliver_message_to(notification.recipient, notification.message)
+      @logger.notify(:forwarding_private_message, notification)
     end
 
     private
-
-    attr_reader :delivery
 
     def remove_follower(follower, followed)
       @followers[followed] = @followers[followed] - [follower]
@@ -212,8 +218,8 @@ describe 'Activity Broker' do
   end
 
   class NotificationOrdering
-    def initialize(listener)
-      @listener = listener
+    def initialize(next_notification_listener)
+      @next_notification_listener = next_notification_listener
       @last_notification = nil
       @notification_queue = []
     end
@@ -241,7 +247,7 @@ describe 'Activity Broker' do
     end
 
     def forward_notification(notification)
-      @listener.process_notification(notification)
+      @next_notification_listener.process_notification(notification)
       @last_notification = notification
     end
 
@@ -251,40 +257,41 @@ describe 'Activity Broker' do
   end
 
   class SubscriberMessageTranslator
-    def initialize(listener)
-      @listener = listener
+    def initialize(translated_message_listener)
+      @translated_message_listener = translated_message_listener
     end
 
     def process_message(message, subscriber_stream)
-      @listener.register_subscriber(message, subscriber_stream)
+      @translated_message_listener.register_subscriber(message, subscriber_stream)
     end
   end
 
   class NotificationTranslator
-    def initialize(listener)
-      @listener = listener
+    def initialize(notification_listener)
+      @notification_listener = notification_listener
     end
 
     def process_notification(notification)
       case notification.type
       when 'B'
-        @listener.process_broadcast_event(notification)
+        @notification_listener.process_broadcast_event(notification)
       when 'F'
-        @listener.process_follow_event(notification)
+        @notification_listener.process_follow_event(notification)
       when 'U'
-        @listener.process_unfollow_event(notification)
+        @notification_listener.process_unfollow_event(notification)
       when 'P'
-        @listener.process_private_message_event(notification)
+        @notification_listener.process_private_message_event(notification)
       when 'S'
-        @listener.process_status_update_event(notification)
+        @notification_listener.process_status_update_event(notification)
       end
     end
   end
 
   class MessageStream
-    def initialize(io, io_loop)
+    def initialize(io, io_loop, logger)
       @io = io
       @io_loop = io_loop
+      @logger = logger
       @read_buffer = ''
     end
 
@@ -297,35 +304,32 @@ describe 'Activity Broker' do
       @io
     end
 
-    def data_received
-      begin
-        read = @io.read_nonblock(4096)
-        @read_buffer << read
-        forward_messages
-      rescue IO::WaitReadable
-        # Oops, turned out the IO wasn't actually readable.
-      rescue EOFError, Errno::ECONNRESET
-        # Connection closed
-      end
-    end
-
     def write(message)
       @io.write(message)
       @io.write(CRLF)
     end
 
+    private
+
+    def data_received
+      begin
+        @read_buffer << @io.read_nonblock(4096)
+        forward_messages
+      rescue IO::WaitReadable
+        # IO isn't actually readable.
+      rescue EOFError, Errno::ECONNRESET
+        # Connection closed
+      end
+    end
+
     def forward_messages
+      message_regex = /([^\/]*)\/r\/n/
+
       @read_buffer.scan(message_regex).flatten.each do |m|
-        puts 'processing message ' + m
+        @logger.notify(:streaming_message, m)
         @message_listener.process_message(m, self)
       end
       @read_buffer = @read_buffer.gsub(message_regex, "")
-    end
-
-    private
-
-    def message_regex
-      /([^\/]*)\/r\/n/
     end
   end
 
@@ -371,9 +375,11 @@ describe 'Activity Broker' do
     end
   end
 
-  class Logger
-    def initialize
-
+  class ApplicationLogger
+    def initialize(output, level = Logger::INFO)
+      @logger = Logger.new(output)
+      @logger.datetime_format = "%Y-%m-%d %H:%M:%S"
+      @logger.level = level
     end
 
     def notify(event, *other)
@@ -382,36 +388,65 @@ describe 'Activity Broker' do
 
     private
 
-    def monitoring_connections(port)
-      log('started tcp server on ' + port.to_s)
+    def server_accepting_connections(port)
+      log_info('server accepting connections on port ' + port.to_s)
     end
 
-    def new_client_connection_accepted(connection)
-      log('new client connection accepted')
+    def connection_accepted(port)
+      log_info('connection accepted on port ' + port.to_s)
     end
 
-    def message_received(message)
-      log('message received' + message)
+    def streaming_message(message)
+      log_info('streaming message ' + message)
     end
 
-    def message_sent(message)
-      log('message sent' + message)
+    def registering_subscriber(subscriber_id)
+      log_info('registering subscriber ' + subscriber_id)
     end
 
-    def exchange_exit
-      log('exchange stopped')
+    def forwarding_broadcast_event(notification)
+      log_info('forwarding broadcast event: ' + notification.message)
     end
 
-    def log(message)
-      puts Time.now.to_s + ' | ' + message
+    def forwarding_follow_event(notification)
+      log_info('forwarding follow event: ' + notification.message)
+    end
+
+    def forwarding_unfollow_event(notification)
+      log_info('forwarding unfollow event: ' + notification.message)
+    end
+
+    def forwarding_private_message(notification)
+      log_info('forwarding private message: ' + notification.message)
+    end
+
+    def log_info(message)
+      @logger.info(message)
+    end
+  end
+
+  class TestLogger < ApplicationLogger
+    private
+
+    def publishing_event(message)
+      log_info('publishing event: ' + message)
+    end
+
+    def sending_subscriber_id(subscriber_id)
+      log_info('sending subscriber id: ' + subscriber_id)
+    end
+
+    def receiving_notification(notification, subscriber_id)
+      log_info(subscriber_id + ' received notification: ' + notification)
     end
   end
 
   class FakeSubscriber
-    def initialize(client_id, address, port)
+    def initialize(client_id, address, port, logger)
       @client_id = client_id
-      @address   = address
-      @port      = port
+      @address = address
+      @port = port
+      @logger = logger
       @notifications = []
     end
 
@@ -426,7 +461,7 @@ describe 'Activity Broker' do
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
-      puts 'writing client id ' + @client_id
+      @logger.notify(:sending_subscriber_id, @client_id)
     end
 
     def has_received_notification_of?(notification, *args)
@@ -438,7 +473,7 @@ describe 'Activity Broker' do
         if read_ready
           buffer = read_ready.first.read_nonblock(4096)
           buffer.split(CRLF).each do |notification|
-            puts @client_id + ' got notification: ' + notification
+            @logger.notify(:receiving_notification, notification, @client_id)
             @notifications << notification
           end
         end
@@ -457,13 +492,17 @@ describe 'Activity Broker' do
   let!(:broker) do
     ApplicationRunner.new({ event_source_exchange_port: 4484,
                             subscriber_exchange_port: 4485,
-                            logger: Logger.new }).tap do |a|
+                            logger: test_logger }).tap do |a|
       a.listen
     end
   end
 
   let!(:source) do
-    FakeEventSource.new('0.0.0.0', 4484)
+    FakeEventSource.new('0.0.0.0', 4484, test_logger)
+  end
+
+  let!(:test_logger) do
+    TestLogger.new(STDOUT, Logger::INFO)
   end
 
   def start_activity_broker
@@ -666,7 +705,7 @@ describe 'Activity Broker' do
   end
 
   def start_subscriber(id, port)
-    FakeSubscriber.new(id, '0.0.0.0', port).tap do |s|
+    FakeSubscriber.new(id, '0.0.0.0', port, test_logger).tap do |s|
       s.start
       s.send_client_id
       eventually { expect(s.received_joined_ack?).to eq true }
