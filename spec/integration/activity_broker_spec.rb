@@ -20,32 +20,24 @@ describe 'Activity Broker' do
       @connection = Socket.tcp(@host, @port)
     end
 
-    def publish_broadcast_event(options = {})
-      publish_event('|B', options)
+    def publish_broadcast_event(id: nil)
+      publish_event('B', id)
     end
 
-    def publish_new_follower_to(recipient, sender, options = {})
-      publish_event('|F|' + sender + '|' + recipient, options)
+    def publish_new_follower_to(recipient, sender, id: nil)
+      publish_event('F', sender, recipient, id)
     end
 
-    def publish_status_update_from(sender, options = {})
-      publish_event('|S|' + sender, options)
+    def publish_status_update_from(sender, id: nil)
+      publish_event('S', sender, id)
     end
 
-    def publish_private_message_to(recipient, sender, options = {})
-      publish_event('|P|' + sender + '|' + recipient, options)
+    def publish_private_message_to(recipient, sender, id: nil)
+      publish_event('P', sender, recipient, id)
     end
 
-    def publish_unfollow_to(recipient, sender, options = {})
-      publish_event('|U|' + sender + '|' + recipient)
-    end
-
-    def publish_event(event, options = {})
-      full_message = options.fetch(:id, event_id).to_s + event
-      @event_logger.notify(:publishing_event, full_message)
-      @connection.write(full_message)
-      @connection.write(CRLF)
-      full_message
+    def publish_unfollow_to(recipient, sender, id: nil)
+      publish_event('U', sender, recipient,  id)
     end
 
     def stop
@@ -54,7 +46,16 @@ describe 'Activity Broker' do
 
     private
 
-    def event_id
+    def publish_event(*notification_args, id)
+      notification_args.unshift(id || generate_event_id)
+      full_message = notification_args.join('|')
+      @event_logger.notify(:publishing_event, full_message)
+      @connection.write(full_message)
+      @connection.write(CRLF)
+      full_message
+    end
+
+    def generate_event_id
       @event_id += 1
     end
   end
@@ -332,7 +333,7 @@ describe 'Activity Broker' do
         @event_logger.notify(:streaming_message, m)
         @message_listener.process_message(m, self)
       end
-      @read_buffer = @read_buffer.gsub(message_regex, "")
+      @read_buffer = @read_buffer.gsub(message_regex, '')
     end
   end
 
