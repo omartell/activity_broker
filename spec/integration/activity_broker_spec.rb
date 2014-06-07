@@ -464,23 +464,29 @@ describe 'Activity Broker' do
     end
 
     def has_received_notification_of?(notification, *args)
-      notification = notification.to_s
-      if @notifications.include?(notification)
+      if @notifications.include?(notification.to_s)
         true
       else
-        read_ready, _, _ = IO.select([@connection], nil, nil, 0)
-        if read_ready
-          buffer = read_ready.first.read_nonblock(4096)
-          buffer.split(CRLF).each do |notification|
-            @event_logger.notify(:receiving_notification, notification, @client_id)
-            @notifications << notification
-          end
-        end
+        read_notifications
+        false
       end
     end
 
     def stop
       @connection.close
+    end
+
+    private
+
+    def read_notifications
+      read_ready, _, _ = IO.select([@connection], nil, nil, 0)
+      if read_ready
+        buffer = read_ready.first.read_nonblock(4096)
+        buffer.split(CRLF).each do |notification|
+          @event_logger.notify(:receiving_notification, notification, @client_id)
+          @notifications << notification
+        end
+      end
     end
   end
 
