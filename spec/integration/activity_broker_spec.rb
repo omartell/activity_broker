@@ -9,11 +9,11 @@ describe 'Activity Broker' do
   CRLF = '/r/n'
 
   class FakeEventSource
-    def initialize(host, port, logger)
+    def initialize(host, port, event_logger)
       @host = host
       @port = port
       @event_id = 0
-      @logger = logger
+      @event_logger = event_logger
     end
 
     def start
@@ -42,7 +42,7 @@ describe 'Activity Broker' do
 
     def publish_event(event, options = {})
       full_message = options.fetch(:id, event_id).to_s + event
-      @logger.notify(:publishing_event, full_message)
+      @event_logger.notify(:publishing_event, full_message)
       @connection.write(full_message)
       @connection.write(CRLF)
       full_message
@@ -63,25 +63,22 @@ describe 'Activity Broker' do
     def initialize(config)
       @config = config
       @event_loop = EventLoop.new
-      @logger = @config.fetch(:logger){ ApplicationLogger.new }
-    end
-
-    def listen
-      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop, @logger)
-      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop, @logger)
+      @event_logger = @config.fetch(:event_logger){ ApplicationEventLogger.new }
     end
 
     def start
-      forwarder = NotificationForwarder.new(NotificationDelivery.new, @logger)
-      event_notification_translator = NotificationTranslator.new(forwarder)
-      ordering = NotificationOrdering.new(event_notification_translator)
+      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop, @event_logger)
+      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop, @event_logger)
+      notification_forwarder  = NotificationForwarder.new(NotificationDelivery.new, @event_logger)
+      notification_translator = NotificationTranslator.new(notification_forwarder)
+      ordering = NotificationOrdering.new(notification_translator)
       unpacker = EventSourceMessageUnpacker.new(ordering)
 
       @event_source_server.accept_connections do |message_stream|
         message_stream.read(unpacker)
       end
 
-      subscriber_translator = SubscriberMessageTranslator.new(forwarder)
+      subscriber_translator = SubscriberMessageTranslator.new(notification_forwarder)
       @subscriber_server.accept_connections do |message_stream|
         message_stream.read(subscriber_translator)
       end
@@ -90,24 +87,28 @@ describe 'Activity Broker' do
       @event_loop.start
     end
 
+    def stop
+      @event_source_server.stop
+      @subscriber_server.stop
+    end
+
     def trap_signal
       trap(:INT) do
-        @event_source_server.stop
-        @subscriber_server.stop
+        stop
         exit
       end
     end
   end
 
   class Server
-    def initialize(port, io_loop, logger)
+    def initialize(port, io_loop, event_logger)
       @port = port
       @io_loop = io_loop
-      @logger = logger
+      @event_logger = event_logger
     end
 
     def accept_connections(&connection_accepted_listener)
-      @logger.notify(:server_accepting_connections, @port)
+      @event_logger.notify(:server_accepting_connections, @port)
       @server = TCPServer.new(@port)
       @connection_accepted_listener = connection_accepted_listener
       @io_loop.register_read(self, :process_new_connection)
@@ -123,8 +124,8 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection = @server.accept_nonblock
-      @logger.notify(:connection_accepted, @port)
-      @connection_accepted_listener.call(MessageStream.new(connection, @io_loop, @logger))
+      @event_logger.notify(:connection_accepted, @port)
+      @connection_accepted_listener.call(MessageStream.new(connection, @io_loop, @event_logger))
     end
   end
 
@@ -151,45 +152,44 @@ describe 'Activity Broker' do
   end
 
   class NotificationForwarder
-    def initialize(notification_delivery, logger)
+    def initialize(notification_delivery, event_event_logger)
       @followers = Hash.new { |hash, key| hash[key] = [] }
       @delivery = notification_delivery
-      @logger = logger
+      @event_logger = event_event_logger
     end
 
     def register_subscriber(subscriber_id, subscriber_stream)
       @delivery.add_subscriber(subscriber_id, subscriber_stream)
-      @delivery.deliver_message_to(subscriber_id, 'welcome')
-      @logger.notify(:registering_subscriber, subscriber_id)
+      @event_logger.notify(:registering_subscriber, subscriber_id)
     end
 
     def process_broadcast_event(notification)
       @delivery.deliver_message_to_everyone(notification.message)
-      @logger.notify(:forwarding_broadcast_event, notification)
+      @event_logger.notify(:forwarding_broadcast_event, notification)
     end
 
     def process_follow_event(notification)
       add_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @logger.notify(:forwarding_follow_event, notification)
+      @event_logger.notify(:forwarding_follow_event, notification)
     end
 
     def process_unfollow_event(notification)
       remove_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @logger.notify(:forwarding_unfollow_event, notification)
+      @event_logger.notify(:forwarding_unfollow_event, notification)
     end
 
     def process_status_update_event(notification)
       @followers.fetch(notification.sender).each do |follower|
         @delivery.deliver_message_to(follower, notification.message)
       end
-      @logger.notify(:forwarding_unfollow_event, notification)
+      @event_logger.notify(:forwarding_unfollow_event, notification)
     end
 
     def process_private_message_event(notification)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @logger.notify(:forwarding_private_message, notification)
+      @event_logger.notify(:forwarding_private_message, notification)
     end
 
     private
@@ -288,10 +288,10 @@ describe 'Activity Broker' do
   end
 
   class MessageStream
-    def initialize(io, io_loop, logger)
+    def initialize(io, io_loop, event_logger)
       @io = io
       @io_loop = io_loop
-      @logger = logger
+      @event_logger = event_logger
       @read_buffer = ''
     end
 
@@ -324,9 +324,8 @@ describe 'Activity Broker' do
 
     def forward_messages
       message_regex = /([^\/]*)\/r\/n/
-
       @read_buffer.scan(message_regex).flatten.each do |m|
-        @logger.notify(:streaming_message, m)
+        @event_logger.notify(:streaming_message, m)
         @message_listener.process_message(m, self)
       end
       @read_buffer = @read_buffer.gsub(message_regex, "")
@@ -375,7 +374,7 @@ describe 'Activity Broker' do
     end
   end
 
-  class ApplicationLogger
+  class ApplicationEventLogger
     def initialize(output, level = Logger::INFO)
       @logger = Logger.new(output)
       @logger.datetime_format = "%Y-%m-%d %H:%M:%S"
@@ -425,7 +424,7 @@ describe 'Activity Broker' do
     end
   end
 
-  class TestLogger < ApplicationLogger
+  class TestEventLogger < ApplicationEventLogger
     private
 
     def publishing_event(message)
@@ -442,11 +441,11 @@ describe 'Activity Broker' do
   end
 
   class FakeSubscriber
-    def initialize(client_id, address, port, logger)
+    def initialize(client_id, address, port, event_logger)
       @client_id = client_id
       @address = address
       @port = port
-      @logger = logger
+      @event_logger = event_logger
       @notifications = []
     end
 
@@ -461,7 +460,7 @@ describe 'Activity Broker' do
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
-      @logger.notify(:sending_subscriber_id, @client_id)
+      @event_logger.notify(:sending_subscriber_id, @client_id)
     end
 
     def has_received_notification_of?(notification, *args)
@@ -473,7 +472,7 @@ describe 'Activity Broker' do
         if read_ready
           buffer = read_ready.first.read_nonblock(4096)
           buffer.split(CRLF).each do |notification|
-            @logger.notify(:receiving_notification, notification, @client_id)
+            @event_logger.notify(:receiving_notification, notification, @client_id)
             @notifications << notification
           end
         end
@@ -489,24 +488,29 @@ describe 'Activity Broker' do
     end
   end
 
-  let!(:broker) do
-    ApplicationRunner.new({ event_source_exchange_port: 4484,
-                            subscriber_exchange_port: 4485,
-                            logger: test_logger }).tap do |a|
-      a.listen
+  let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::INFO)  }
+  let!(:event_source) { FakeEventSource.new('0.0.0.0', 4484, test_logger) }
+  let!(:activity_broker) { ApplicationRunner.new({ event_source_exchange_port: 4484,
+                                                   subscriber_exchange_port: 4485,
+                                                   event_logger: test_logger }) }
+
+  def start_activity_broker
+    Thread.new { activity_broker.start }
+  end
+
+  def start_subscriber(id, port)
+    @subscribers ||= []
+    FakeSubscriber.new(id, '0.0.0.0', port, test_logger).tap do |subscriber|
+      subscriber.start
+      subscriber.send_client_id
+      @subscribers << subscriber
     end
   end
 
-  let!(:source) do
-    FakeEventSource.new('0.0.0.0', 4484, test_logger)
-  end
-
-  let!(:test_logger) do
-    TestLogger.new(STDOUT, Logger::INFO)
-  end
-
-  def start_activity_broker
-    @brokerpid = fork { broker.start }
+  after do
+    event_source.stop
+    @subscribers.each(&:stop)
+    activity_broker.stop
   end
 
   specify 'A subscriber is notified of broadcast event' do
@@ -514,9 +518,9 @@ describe 'Activity Broker' do
 
     bob = start_subscriber('bob', 4485)
 
-    source.start
+    event_source.start
 
-    broadcast = source.publish_broadcast_event
+    broadcast = event_source.publish_broadcast_event
 
     eventually do
       expect(bob).to have_received_notification_of(broadcast)
@@ -530,9 +534,9 @@ describe 'Activity Broker' do
       start_subscriber('alice' + id.to_s, 4485)
     end
 
-    source.start
+    event_source.start
 
-    broadcast = source.publish_broadcast_event
+    broadcast = event_source.publish_broadcast_event
 
     eventually do
       subscribers.each do |subscriber|
@@ -547,9 +551,9 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    new_follower = source.publish_new_follower_to('bob', 'alice')
+    new_follower = event_source.publish_new_follower_to('bob', 'alice')
 
     eventually do
       expect(bob).to have_received_notification_of(new_follower)
@@ -563,16 +567,16 @@ describe 'Activity Broker' do
     alice   = start_subscriber('alice', 4485)
     robert  = start_subscriber('robert', 4485)
 
-    source.start
+    event_source.start
 
-    alice_following_bob  = source.publish_new_follower_to('bob', 'alice')
-    robert_following_bob = source.publish_new_follower_to('bob', 'robert')
+    alice_following_bob  = event_source.publish_new_follower_to('bob', 'alice')
+    robert_following_bob = event_source.publish_new_follower_to('bob', 'robert')
 
-    robert_following_alice = source.publish_new_follower_to('alice', 'robert')
-    bob_following_alice    = source.publish_new_follower_to('alice', 'bob')
+    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert')
+    bob_following_alice    = event_source.publish_new_follower_to('alice', 'bob')
 
-    alice_following_robert = source.publish_new_follower_to('robert', 'alice')
-    bob_following_robert   = source.publish_new_follower_to('robert', 'bob')
+    alice_following_robert = event_source.publish_new_follower_to('robert', 'alice')
+    bob_following_robert   = event_source.publish_new_follower_to('robert', 'bob')
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)
@@ -592,11 +596,11 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    source.publish_new_follower_to('bob', 'alice')
+    event_source.publish_new_follower_to('bob', 'alice')
 
-    alice_unfollowed_bob = source.publish_unfollow_to('bob', 'alice')
+    alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
 
     eventually do
       expect(bob).to have_received_notification_of(alice_unfollowed_bob)
@@ -609,9 +613,9 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    private_message = source.publish_private_message_to('bob', 'alice')
+    private_message = event_source.publish_private_message_to('bob', 'alice')
 
     eventually do
       expect(bob).to have_received_notification_of(private_message)
@@ -624,13 +628,13 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    source.publish_new_follower_to('bob', 'alice')
-    bob_status_update = source.publish_status_update_from('bob')
+    event_source.publish_new_follower_to('bob', 'alice')
+    bob_status_update = event_source.publish_status_update_from('bob')
 
-    source.publish_new_follower_to('alice', 'bob')
-    alice_status_update = source.publish_status_update_from('alice')
+    event_source.publish_new_follower_to('alice', 'bob')
+    alice_status_update = event_source.publish_status_update_from('alice')
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
@@ -644,17 +648,17 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    source.publish_new_follower_to('bob', 'alice')
-    bob_status_update = source.publish_status_update_from('bob')
+    event_source.publish_new_follower_to('bob', 'alice')
+    bob_status_update = event_source.publish_status_update_from('bob')
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
     end
 
-    source.publish_unfollow_to('bob', 'alice')
-    new_bob_status_update = source.publish_status_update_from('bob')
+    event_source.publish_unfollow_to('bob', 'alice')
+    new_bob_status_update = event_source.publish_status_update_from('bob')
 
     eventually do
       expect(alice).not_to have_received_notification_of(new_bob_status_update)
@@ -667,18 +671,18 @@ describe 'Activity Broker' do
     bob   = start_subscriber('bob', 4485)
     alice = start_subscriber('alice', 4485)
 
-    source.start
+    event_source.start
 
-    robert_following_alice = source.publish_new_follower_to('alice', 'robert', id: 1)
-    alice_following_bob = source.publish_new_follower_to('bob', 'alice', id: 2)
-    newer_bob_status_update = source.publish_status_update_from('bob', id: 4)
+    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert', id: 1)
+    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice', id: 2)
+    newer_bob_status_update = event_source.publish_status_update_from('bob', id: 4)
 
     eventually do
       expect(alice).to have_received_notification_of(robert_following_alice)
       expect(bob).to have_received_notification_of(alice_following_bob)
     end
 
-    bob_status_update = source.publish_status_update_from('bob', id: 3)
+    bob_status_update = event_source.publish_status_update_from('bob', id: 3)
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
@@ -694,32 +698,13 @@ describe 'Activity Broker' do
 
     bob = start_subscriber('bob', 4485)
 
-    source.start
+    event_source.start
 
-    alice_following_bob = source.publish_new_follower_to('bob', 'alice', id: 1)
-    robert_following_alice = source.publish_new_follower_to('alice', 'robert', id: 2)
+    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice', id: 1)
+    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert', id: 2)
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)
     end
-  end
-
-  def start_subscriber(id, port)
-    FakeSubscriber.new(id, '0.0.0.0', port, test_logger).tap do |s|
-      s.start
-      s.send_client_id
-      eventually { expect(s.received_joined_ack?).to eq true }
-      @subscribers.push(s)
-    end
-  end
-
-  before do
-    @subscribers = []
-  end
-
-  after do
-    source.stop
-    @subscribers.each(&:stop)
-    Process.kill(:INT, @brokerpid) if @brokerpid
   end
 end
