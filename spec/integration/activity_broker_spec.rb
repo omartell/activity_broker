@@ -505,9 +505,9 @@ describe 'Activity Broker' do
     Thread.new { activity_broker.start }
   end
 
-  def start_subscriber(id, port)
+  def start_subscriber(id)
     @subscribers ||= []
-    FakeSubscriber.new(id, '0.0.0.0', port, test_logger).tap do |subscriber|
+    FakeSubscriber.new(id, '0.0.0.0', 4485, test_logger).tap do |subscriber|
       subscriber.start
       subscriber.send_client_id
       @subscribers << subscriber
@@ -523,7 +523,7 @@ describe 'Activity Broker' do
   specify 'A subscriber is notified of broadcast event' do
     start_activity_broker
 
-    bob = start_subscriber('bob', 4485)
+    bob = start_subscriber('bob')
 
     event_source.start
 
@@ -538,7 +538,7 @@ describe 'Activity Broker' do
     start_activity_broker
 
     subscribers = 10.times.map do |id|
-      start_subscriber('alice' + id.to_s, 4485)
+      start_subscriber('alice' + id.to_s)
     end
 
     event_source.start
@@ -555,8 +555,8 @@ describe 'Activity Broker' do
   specify 'A subscriber is notified of new follower' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -570,9 +570,9 @@ describe 'Activity Broker' do
   specify 'Multiple subscribers are notified of new followers' do
     start_activity_broker
 
-    bob     = start_subscriber('bob', 4485)
-    alice   = start_subscriber('alice', 4485)
-    robert  = start_subscriber('robert', 4485)
+    bob     = start_subscriber('bob')
+    alice   = start_subscriber('alice')
+    robert  = start_subscriber('robert')
 
     event_source.start
 
@@ -600,8 +600,8 @@ describe 'Activity Broker' do
   specify 'Unfollowed notification is forwarded to subscriber' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -617,8 +617,8 @@ describe 'Activity Broker' do
   specify 'Subscriber is notified of a private message' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -632,8 +632,8 @@ describe 'Activity Broker' do
   specify 'Followers are notified of status updates from the users they follow' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -652,8 +652,8 @@ describe 'Activity Broker' do
   specify 'A subscriber no longer receive updates from a user after unfollowing' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -675,8 +675,8 @@ describe 'Activity Broker' do
   specify 'Subscribers receive event notifications in order' do
     start_activity_broker
 
-    bob   = start_subscriber('bob', 4485)
-    alice = start_subscriber('alice', 4485)
+    bob   = start_subscriber('bob')
+    alice = start_subscriber('alice')
 
     event_source.start
 
@@ -703,7 +703,7 @@ describe 'Activity Broker' do
   specify 'Event notifications are ignored if subscriber is not connected' do
     start_activity_broker
 
-    bob = start_subscriber('bob', 4485)
+    bob = start_subscriber('bob')
 
     event_source.start
 
