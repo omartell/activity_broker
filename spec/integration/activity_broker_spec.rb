@@ -69,8 +69,8 @@ describe 'Activity Broker' do
     def start
       @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop, @event_logger)
       @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop, @event_logger)
-      notification_forwarder  = NotificationForwarder.new(NotificationDelivery.new, @event_logger)
-      notification_translator = NotificationTranslator.new(notification_forwarder)
+      notification_router  = NotificationRouter.new(NotificationDelivery.new, @event_logger)
+      notification_translator = NotificationTranslator.new(notification_router)
       ordering = NotificationOrdering.new(notification_translator)
       unpacker = EventSourceMessageUnpacker.new(ordering)
 
@@ -78,7 +78,7 @@ describe 'Activity Broker' do
         message_stream.read(unpacker)
       end
 
-      subscriber_translator = SubscriberMessageTranslator.new(notification_forwarder)
+      subscriber_translator = SubscriberMessageTranslator.new(notification_router)
       @subscriber_server.accept_connections do |message_stream|
         message_stream.read(subscriber_translator)
       end
@@ -151,48 +151,52 @@ describe 'Activity Broker' do
     end
   end
 
-  class NotificationForwarder
-    def initialize(notification_delivery, event_event_logger)
+  class NotificationRouter
+    def initialize(notification_delivery, event_logger)
       @followers = Hash.new { |hash, key| hash[key] = [] }
       @delivery = notification_delivery
-      @event_logger = event_event_logger
+      @event_logger = event_logger
     end
 
     def register_subscriber(subscriber_id, subscriber_stream)
       @delivery.add_subscriber(subscriber_id, subscriber_stream)
-      @event_logger.notify(:registering_subscriber, subscriber_id)
+      log(:registering_subscriber, subscriber_id)
     end
 
     def process_broadcast_event(notification)
       @delivery.deliver_message_to_everyone(notification.message)
-      @event_logger.notify(:forwarding_broadcast_event, notification)
+      log(:forwarding_broadcast_event, notification)
     end
 
     def process_follow_event(notification)
       add_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @event_logger.notify(:forwarding_follow_event, notification)
+      log(:forwarding_follow_event, notification)
     end
 
     def process_unfollow_event(notification)
       remove_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @event_logger.notify(:forwarding_unfollow_event, notification)
+      log(:forwarding_unfollow_event, notification)
     end
 
     def process_status_update_event(notification)
       @followers.fetch(notification.sender).each do |follower|
         @delivery.deliver_message_to(follower, notification.message)
       end
-      @event_logger.notify(:forwarding_unfollow_event, notification)
+      log(:forwarding_unfollow_event, notification)
     end
 
     def process_private_message_event(notification)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      @event_logger.notify(:forwarding_private_message, notification)
+      log(:forwarding_private_message, notification)
     end
 
     private
+
+    def log(event, notification)
+      @event_logger.notify(event, notification)
+    end
 
     def remove_follower(follower, followed)
       @followers[followed] = @followers[followed] - [follower]
