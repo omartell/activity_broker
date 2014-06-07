@@ -479,10 +479,6 @@ describe 'Activity Broker' do
       end
     end
 
-    def received_joined_ack?
-      has_received_notification_of?('welcome')
-    end
-
     def stop
       @connection.close
     end
