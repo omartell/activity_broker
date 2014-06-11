@@ -63,8 +63,10 @@ describe 'Activity Broker' do
   class ApplicationRunner
     def initialize(config)
       @config = config
-      @event_loop = EventLoop.new
-      @event_logger = @config.fetch(:event_logger){ ApplicationEventLogger.new }
+      @event_logger = @config.fetch(:event_logger) do
+        ApplicationEventLogger.new('/tmp/activity_broker.log', Logger::INFO)
+      end
+      @event_loop = EventLoop.new(@event_logger)
     end
 
     def start
@@ -303,7 +305,8 @@ describe 'Activity Broker' do
       @io = io
       @io_loop = io_loop
       @event_logger = event_logger
-      @read_buffer = ''
+      @read_buffer  = ''
+      @write_buffer = ''
     end
 
     def read(message_listener)
@@ -316,11 +319,26 @@ describe 'Activity Broker' do
     end
 
     def write(message)
-      @io.write(message)
-      @io.write(CRLF)
+      @write_buffer << message
+      @write_buffer << CRLF
+      @io_loop.register_write(self, :ready_to_write)
     end
 
+
+
     private
+
+    def ready_to_write
+      begin
+        bytes_written = @io.write_nonblock(@write_buffer)
+        @write_buffer.slice!(0, bytes_written)
+        if @write_buffer.empty?
+          @io_loop.deregister_write(self, :ready_to_write)
+        end
+      rescue Errno::EAGAIN
+        # write would actually block
+      end
+    end
 
     def data_received
       begin
@@ -344,36 +362,74 @@ describe 'Activity Broker' do
   end
 
   class EventLoop
-    def initialize
+    def initialize(logger)
       @reading = []
       @writing = []
+      @logger  = logger
     end
 
     def start
       loop do
-        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil)
+        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil, 0)
         ((ready_writing || []) + (ready_reading || [])).each(&:notify)
+
+        if @stop
+          @logger.notify(:shutting_down_reactor)
+          break
+        end
       end
     end
 
     def register_read(listener, event = nil, &block)
-      @reading << IOListener.new(listener, event, block)
+      io_listener = new_io_listener(listener, event, block)
+      if !@reading.include?(io_listener)
+        @reading << io_listener
+      end
     end
 
     def register_write(listener, event = nil, &block)
-      @writing << IOListener.new(listener, event, block)
+      io_listener = new_io_listener(listener, event, block)
+      if !@writing.include?(io_listener)
+        @writing << io_listener
+      end
+    end
+
+    def stop
+      @stop = true
+    end
+
+    def deregister_write(listener, event = nil, &block)
+      @writing.delete(new_io_listener(listener, event, block))
+    end
+
+    def deregister_read(listener, event = nil, &block)
+      @reading.delete(new_io_listener(listener, event, block))
+    end
+
+    private
+
+    def new_io_listener(listener, event, block)
+      IOListener.new(listener, event, block, @logger)
     end
   end
 
   class IOListener
-    def initialize(listener, event, block)
+    attr_reader :listener, :event, :block
+    def initialize(listener, event, block, logger)
       @listener = listener
       @event = event
       @block = block
+      @logger = logger
     end
 
     def to_io
       @listener.to_io
+    end
+
+    def ==(other_io_listener)
+      self.event == other_io_listener.event &&
+      self.listener == other_io_listener.listener &&
+      self.block == other_io_listener.block
     end
 
     def notify
