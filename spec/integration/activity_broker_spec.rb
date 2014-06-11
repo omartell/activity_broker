@@ -169,41 +169,41 @@ describe 'Activity Broker' do
 
     def register_subscriber(subscriber_id, subscriber_stream)
       @delivery.add_subscriber(subscriber_id, subscriber_stream)
-      log(:registering_subscriber, subscriber_id)
+      notify(:registering_subscriber, subscriber_id)
     end
 
     def process_broadcast_event(notification)
       @delivery.deliver_message_to_everyone(notification.message)
-      log(:forwarding_broadcast_event, notification)
+      notify(:forwarding_broadcast_event, notification)
     end
 
     def process_follow_event(notification)
       add_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_follow_event, notification)
+      notify(:forwarding_follow_event, notification)
     end
 
     def process_unfollow_event(notification)
       remove_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_unfollow_event, notification)
+      notify(:forwarding_unfollow_event, notification)
     end
 
     def process_status_update_event(notification)
       @followers.fetch(notification.sender).each do |follower|
         @delivery.deliver_message_to(follower, notification.message)
       end
-      log(:forwarding_unfollow_event, notification)
+      notify(:forwarding_status_update, notification)
     end
 
     def process_private_message_event(notification)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_private_message, notification)
+      notify(:forwarding_private_message, notification)
     end
 
     private
 
-    def log(event, notification)
+    def notify(event, notification)
       @event_logger.notify(event, notification)
     end
 
@@ -454,6 +454,10 @@ describe 'Activity Broker' do
 
     private
 
+    def log_info(message)
+      @logger.info(message)
+    end
+
     def server_accepting_connections(port)
       log_info('server accepting connections on port ' + port.to_s)
     end
@@ -482,16 +486,41 @@ describe 'Activity Broker' do
       log_info('forwarding unfollow event: ' + notification.message)
     end
 
+    def forwarding_status_update(notification)
+      log_info('forwarding status update: ' + notification.message)
+    end
+
     def forwarding_private_message(notification)
       log_info('forwarding private message: ' + notification.message)
     end
 
-    def log_info(message)
-      @logger.info(message)
+    def stopping_server(port)
+      log_info('stopping server on port ' + port.to_s)
+    end
+
+    def stopping_event_source(port)
+      log_info('stopping event source on port ' + port.to_s)
+    end
+
+    def stopping_subscriber(client_id, port)
+      log_info('stopping subscriber ' + client_id + ' on port ' + port.to_s )
+    end
+
+    def received_interrupt_signal
+      log_info('interrupting execution')
+    end
+
+    def handling_thread_interrupt
+      log_info('handling thread interrupt')
+    end
+
+    def shutting_down_reactor
+      log_info('activity broker shutdown')
     end
   end
 
   class TestEventLogger < ApplicationEventLogger
+
     private
 
     def publishing_event(message)
