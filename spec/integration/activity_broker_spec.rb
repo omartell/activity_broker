@@ -41,6 +41,7 @@ describe 'Activity Broker' do
     end
 
     def stop
+      @event_logger.notify(:stopping_event_source, @port)
       @connection.close
     end
 
@@ -93,6 +94,7 @@ describe 'Activity Broker' do
     def stop
       @event_source_server.stop
       @subscriber_server.stop
+      @event_loop.stop
     end
 
     def trap_signal
@@ -114,27 +116,38 @@ describe 'Activity Broker' do
       @port = port
       @io_loop = io_loop
       @event_logger = event_logger
+      @streams = []
     end
 
     def accept_connections(&connection_accepted_listener)
       @event_logger.notify(:server_accepting_connections, @port)
-      @server = TCPServer.new(@port)
+      @tcp_server = TCPServer.new(@port)
       @connection_accepted_listener = connection_accepted_listener
       @io_loop.register_read(self, :process_new_connection)
     end
 
     def to_io
-      @server
+      @tcp_server
     end
 
     def stop
-      @server.close
+      @io_loop.deregister_read(self, :process_new_connection)
+      @streams.each(&:close)
+      @tcp_server.close
     end
 
+    def closed?
+      @tcp_server.closed?
+    end
+
+    private
+
     def process_new_connection
-      connection = @server.accept_nonblock
+      connection     = @tcp_server.accept_nonblock
+      message_stream = MessageStream.new(connection, @io_loop, @event_logger, @port)
+      @streams << message_stream
+      @connection_accepted_listener.call(message_stream)
       @event_logger.notify(:connection_accepted, @port)
-      @connection_accepted_listener.call(MessageStream.new(connection, @io_loop, @event_logger))
     end
   end
 
@@ -148,8 +161,8 @@ describe 'Activity Broker' do
     end
 
     def deliver_message_to(recipient, message)
-      if subscriber = @subscribers[recipient]
-        subscriber.write(message)
+      if subscriber_stream = @subscribers[recipient]
+        subscriber_stream.write(message)
       end
     end
 
@@ -216,9 +229,10 @@ describe 'Activity Broker' do
     end
   end
 
-  EventNotification = Struct.new(:id, :type, :sender, :recipient, :message)
-
   class EventSourceMessageUnpacker
+
+    EventNotification = Struct.new(:id, :type, :sender, :recipient, :message)
+
     def initialize(listener)
       @listener = listener
     end
@@ -301,12 +315,13 @@ describe 'Activity Broker' do
   end
 
   class MessageStream
-    def initialize(io, io_loop, event_logger)
+    def initialize(io, io_loop, event_logger, port)
       @io = io
       @io_loop = io_loop
       @event_logger = event_logger
       @read_buffer  = ''
       @write_buffer = ''
+      @port = port
     end
 
     def read(message_listener)
@@ -324,7 +339,16 @@ describe 'Activity Broker' do
       @io_loop.register_write(self, :ready_to_write)
     end
 
+    def close
+      @closed = true
+      @io_loop.deregister_write(self, :ready_to_write)
+      @io_loop.deregister_read(self, :data_received)
+      @io.close unless @closed
+    end
 
+    def closed?
+      @closed
+    end
 
     private
 
@@ -342,12 +366,15 @@ describe 'Activity Broker' do
 
     def data_received
       begin
-        @read_buffer << @io.read_nonblock(4096)
-        forward_messages
+        unless @closed
+          @read_buffer << @io.read_nonblock(4096)
+          forward_messages
+        end
       rescue IO::WaitReadable
         # IO isn't actually readable.
-      rescue EOFError, Errno::ECONNRESET
-        # Connection closed
+      rescue EOFError
+        # No more data coming from the other end
+        self.close
       end
     end
 
@@ -446,10 +473,16 @@ describe 'Activity Broker' do
       @logger = Logger.new(output)
       @logger.datetime_format = "%Y-%m-%d %H:%M:%S"
       @logger.level = level
+      @events = []
     end
 
     def notify(event, *other)
+      @events << event
       send(event, *other)
+    end
+
+    def registered_event?(event)
+      @events.include?(event)
     end
 
     private
@@ -553,13 +586,17 @@ describe 'Activity Broker' do
       end
     end
 
+    def closed?
+      @connection.closed?
+    end
+
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
       @event_logger.notify(:sending_subscriber_id, @client_id)
     end
 
-    def has_received_notification_of?(notification, *args)
+    def has_received_notification_of?(notification)
       if @notifications.include?(notification.to_s)
         true
       else
@@ -569,6 +606,7 @@ describe 'Activity Broker' do
     end
 
     def stop
+      @event_logger.notify(:stopping_subscriber, @client_id, @port)
       @connection.close
     end
 
@@ -577,10 +615,14 @@ describe 'Activity Broker' do
     def read_notifications
       read_ready, _, _ = IO.select([@connection], nil, nil, 0)
       if read_ready
-        buffer = read_ready.first.read_nonblock(4096)
-        buffer.split(CRLF).each do |notification|
-          @event_logger.notify(:receiving_notification, notification, @client_id)
-          @notifications << notification
+        begin
+          buffer = read_ready.first.read_nonblock(4096)
+          buffer.split(CRLF).each do |notification|
+            @event_logger.notify(:receiving_notification, notification, @client_id)
+            @notifications << notification
+          end
+        rescue EOFError
+          # broker closed connection
         end
       end
     end
@@ -611,7 +653,9 @@ describe 'Activity Broker' do
   after do
     event_source.stop
     @subscribers.each(&:stop)
+    eventually { expect(@subscribers.all?(&:closed?)).to eq true }
     activity_broker.stop
+    eventually { expect(test_logger.registered_event?(:shutting_down_reactor)).to eq true }
   end
 
   specify 'A subscriber is notified of broadcast event' do
@@ -744,6 +788,7 @@ describe 'Activity Broker' do
   end
 
   specify 'A subscriber no longer receive updates from a user after unfollowing' do
+    pending
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -762,6 +807,7 @@ describe 'Activity Broker' do
     new_bob_status_update = event_source.publish_status_update_from('bob')
 
     eventually do
+      # check that it really hasnt received notification
       expect(alice).not_to have_received_notification_of(new_bob_status_update)
     end
   end
