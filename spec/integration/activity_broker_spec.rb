@@ -68,15 +68,15 @@ describe 'Activity Broker' do
     end
 
     def start
-      @event_source_server = Server.new(@config[:event_source_exchange_port], @event_loop, @event_logger)
-      @subscriber_server   = Server.new(@config[:subscriber_exchange_port], @event_loop, @event_logger)
-      notification_router  = NotificationRouter.new(NotificationDelivery.new, @event_logger)
+      @event_source_server = start_server_on(:event_source_port)
+      @subscriber_server   = start_server_on(:subscriber_port)
+      notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
       notification_translator = NotificationTranslator.new(notification_router)
-      ordering = NotificationOrdering.new(notification_translator)
-      unpacker = EventSourceMessageUnpacker.new(ordering)
+      notification_ordering   = NotificationOrdering.new(notification_translator)
+      message_unpacker        = EventSourceMessageUnpacker.new(notification_ordering)
 
       @event_source_server.accept_connections do |message_stream|
-        message_stream.read(unpacker)
+        message_stream.read(message_unpacker)
       end
 
       subscriber_translator = SubscriberMessageTranslator.new(notification_router)
@@ -98,6 +98,12 @@ describe 'Activity Broker' do
         stop
         exit
       end
+    end
+
+    private
+
+    def start_server_on(port)
+      Server.new(@config.fetch(port), @event_loop, @event_logger)
     end
   end
 
@@ -497,12 +503,15 @@ describe 'Activity Broker' do
 
   let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::INFO)  }
   let!(:event_source) { FakeEventSource.new('0.0.0.0', 4484, test_logger) }
-  let!(:activity_broker) { ApplicationRunner.new({ event_source_exchange_port: 4484,
-                                                   subscriber_exchange_port: 4485,
-                                                   event_logger: test_logger }) }
+  let!(:activity_broker) do
+    ApplicationRunner.new({ event_source_port: 4484,
+                            subscriber_port: 4485,
+                            event_logger: test_logger })
+  end
 
   def start_activity_broker
-    Thread.new { activity_broker.start }
+    @thread = Thread.new { activity_broker.start }
+    @thread.abort_on_exception = true
   end
 
   def start_subscriber(id)
