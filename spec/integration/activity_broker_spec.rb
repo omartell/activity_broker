@@ -41,7 +41,7 @@ describe 'Activity Broker' do
     end
 
     def stop
-      @event_logger.notify(:stopping_event_source, @port)
+      @event_logger.log(:stopping_event_source, @port)
       @connection.close
     end
 
@@ -50,7 +50,7 @@ describe 'Activity Broker' do
     def publish_event(*notification_args, id)
       notification_args.unshift(id || generate_event_id)
       full_message = notification_args.join('|')
-      @event_logger.notify(:publishing_event, full_message)
+      @event_logger.log(:publishing_event, full_message)
       @connection.write(full_message)
       @connection.write(CRLF)
       full_message
@@ -116,11 +116,11 @@ describe 'Activity Broker' do
       @port = port
       @io_loop = io_loop
       @event_logger = event_logger
-      @streams = []
+      @message_streams = []
     end
 
     def accept_connections(&connection_accepted_listener)
-      @event_logger.notify(:server_accepting_connections, @port)
+      @event_logger.log(:server_accepting_connections, @port)
       @tcp_server = TCPServer.new(@port)
       @connection_accepted_listener = connection_accepted_listener
       @io_loop.register_read(self, :process_new_connection)
@@ -132,7 +132,7 @@ describe 'Activity Broker' do
 
     def stop
       @io_loop.deregister_read(self, :process_new_connection)
-      @streams.each(&:close)
+      @message_streams.each(&:close)
       @tcp_server.close
     end
 
@@ -145,9 +145,9 @@ describe 'Activity Broker' do
     def process_new_connection
       connection     = @tcp_server.accept_nonblock
       message_stream = MessageStream.new(connection, @io_loop, @event_logger, @port)
-      @streams << message_stream
+      @message_streams << message_stream
       @connection_accepted_listener.call(message_stream)
-      @event_logger.notify(:connection_accepted, @port)
+      @event_logger.log(:connection_accepted, @port)
     end
   end
 
@@ -182,42 +182,42 @@ describe 'Activity Broker' do
 
     def register_subscriber(subscriber_id, subscriber_stream)
       @delivery.add_subscriber(subscriber_id, subscriber_stream)
-      notify(:registering_subscriber, subscriber_id)
+      log(:registering_subscriber, subscriber_id)
     end
 
     def process_broadcast_event(notification)
       @delivery.deliver_message_to_everyone(notification.message)
-      notify(:forwarding_broadcast_event, notification)
+      log(:forwarding_broadcast_event, notification)
     end
 
     def process_follow_event(notification)
       add_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      notify(:forwarding_follow_event, notification)
+      log(:forwarding_follow_event, notification)
     end
 
     def process_unfollow_event(notification)
       remove_follower(notification.sender, notification.recipient)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      notify(:forwarding_unfollow_event, notification)
+      log(:forwarding_unfollow_event, notification)
     end
 
     def process_status_update_event(notification)
       @followers.fetch(notification.sender).each do |follower|
         @delivery.deliver_message_to(follower, notification.message)
       end
-      notify(:forwarding_status_update, notification)
+      log(:forwarding_status_update, notification)
     end
 
     def process_private_message_event(notification)
       @delivery.deliver_message_to(notification.recipient, notification.message)
-      notify(:forwarding_private_message, notification)
+      log(:forwarding_private_message, notification)
     end
 
     private
 
-    def notify(event, notification)
-      @event_logger.notify(event, notification)
+    def log(event, notification)
+      @event_logger.log(event, notification)
     end
 
     def remove_follower(follower, followed)
@@ -381,7 +381,7 @@ describe 'Activity Broker' do
     def forward_messages
       message_regex = /([^\/]*)\/r\/n/
       @read_buffer.scan(message_regex).flatten.each do |m|
-        @event_logger.notify(:streaming_message, m)
+        @event_logger.log(:streaming_message, m)
         @message_listener.process_message(m, self)
       end
       @read_buffer = @read_buffer.gsub(message_regex, '')
@@ -389,19 +389,19 @@ describe 'Activity Broker' do
   end
 
   class EventLoop
-    def initialize(logger)
+    def initialize(event_logger)
       @reading = []
       @writing = []
-      @logger  = logger
+      @event_logger  = event_logger
     end
 
     def start
       loop do
         ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil, 0)
-        ((ready_writing || []) + (ready_reading || [])).each(&:notify)
+        ((ready_writing || []) + (ready_reading || [])).each(&:log)
 
         if @stop
-          @logger.notify(:shutting_down_reactor)
+          @event_logger.log(:shutting_down_reactor)
           break
         end
       end
@@ -436,17 +436,16 @@ describe 'Activity Broker' do
     private
 
     def new_io_listener(listener, event, block)
-      IOListener.new(listener, event, block, @logger)
+      IOListener.new(listener, event, block)
     end
   end
 
   class IOListener
     attr_reader :listener, :event, :block
-    def initialize(listener, event, block, logger)
+    def initialize(listener, event, block)
       @listener = listener
       @event = event
       @block = block
-      @logger = logger
     end
 
     def to_io
@@ -459,7 +458,7 @@ describe 'Activity Broker' do
       self.block == other_io_listener.block
     end
 
-    def notify
+    def log
       if @event
         @listener.send(@event)
       else
@@ -476,7 +475,7 @@ describe 'Activity Broker' do
       @events = []
     end
 
-    def notify(event, *other)
+    def log(event, *other)
       @events << event
       send(event, *other)
     end
@@ -593,7 +592,7 @@ describe 'Activity Broker' do
     def send_client_id
       @connection.write(@client_id)
       @connection.write(CRLF)
-      @event_logger.notify(:sending_subscriber_id, @client_id)
+      @event_logger.log(:sending_subscriber_id, @client_id)
     end
 
     def has_received_notification_of?(notification)
@@ -606,7 +605,7 @@ describe 'Activity Broker' do
     end
 
     def stop
-      @event_logger.notify(:stopping_subscriber, @client_id, @port)
+      @event_logger.log(:stopping_subscriber, @client_id, @port)
       @connection.close
     end
 
@@ -618,7 +617,7 @@ describe 'Activity Broker' do
         begin
           buffer = read_ready.first.read_nonblock(4096)
           buffer.split(CRLF).each do |notification|
-            @event_logger.notify(:receiving_notification, notification, @client_id)
+            @event_logger.log(:receiving_notification, notification, @client_id)
             @notifications << notification
           end
         rescue EOFError
