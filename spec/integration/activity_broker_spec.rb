@@ -635,6 +635,7 @@ describe 'Activity Broker' do
                             subscriber_port: 4485,
                             event_logger: test_logger })
   end
+  let!(:subscribers) { [ ] }
 
   def start_activity_broker
     @thread = Thread.new { activity_broker.start }
@@ -642,18 +643,17 @@ describe 'Activity Broker' do
   end
 
   def start_subscriber(id)
-    @subscribers ||= []
     FakeSubscriber.new(id, '0.0.0.0', 4485, test_logger).tap do |subscriber|
       subscriber.start
       subscriber.send_client_id
-      @subscribers << subscriber
+      subscribers << subscriber
     end
   end
 
   after do
     event_source.stop
-    @subscribers.each(&:stop)
-    eventually { expect(@subscribers.all?(&:closed?)).to eq true }
+    subscribers.each(&:stop)
+    eventually { expect(subscribers.all?(&:closed?)).to eq true }
     activity_broker.stop
     eventually { expect(test_logger.registered_event?(:shutting_down_reactor)).to eq true }
   end
@@ -787,8 +787,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'A subscriber no longer receive updates from a user after unfollowing' do
-    pending
+  xspecify 'A subscriber no longer receive updates from a user after unfollowing' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
