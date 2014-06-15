@@ -6,42 +6,7 @@ module ActivityBroker
   describe EventLoop do
     include AsyncHelper
 
-    class FakeIO
-      def initialize(io)
-        @io = io
-      end
-
-      def to_io
-        @io
-      end
-
-      def read_ready_connection
-        @read_ready_connection = true
-      end
-
-      def close
-        @io.close
-      end
-
-      def reset
-        @read_ready_connection = false
-        @write_ready_connection = false
-      end
-
-      def has_received_read_ready_connection?
-        @read_ready_connection
-      end
-
-      def write_ready_connection
-        @write_ready_connection = true
-      end
-
-      def has_received_write_ready_connection?
-        @write_ready_connection
-      end
-    end
-
-    subject { EventLoop.new(double.as_null_object) }
+    let!(:event_loop) { EventLoop.new(double.as_null_object) }
 
     def server
       @server
@@ -57,7 +22,7 @@ module ActivityBroker
     end
 
     after(:each) do
-      subject.stop
+      event_loop.stop
       @thread.kill
     end
 
@@ -67,73 +32,63 @@ module ActivityBroker
     end
 
     def start_event_loop
-      @thread = Thread.new { subject.start }
+      @thread = Thread.new { event_loop.start }
       @thread.abort_on_exception = true
     end
 
     it 'notifies when a read operation is ready' do
-      fake_server = FakeIO.new(server)
+      fake_server = double(to_io: server, connection_read_ready: nil)
 
-      subject.register_read(fake_server, :read_ready_connection)
-
-      start_event_loop
-
-      eventually { expect(fake_server).to have_received_read_ready_connection }
-
-      subject.deregister_read(fake_server, :read_ready_connection)
-    end
-
-    it 'notifies when a write operation is ready' do
-      fake_socket = FakeIO.new(socket)
-
-      subject.register_write(fake_socket, :write_ready_connection)
-
-      start_event_loop
-
-      eventually { expect(fake_socket).to have_received_write_ready_connection }
-
-      subject.deregister_write(fake_socket, :write_ready_connection)
-    end
-
-    it 'allows to deregister from a read operation' do
-      fake_server = FakeIO.new(server)
-
-      subject.register_read(fake_server, :read_ready_connection)
+      event_loop.register_read(fake_server, :connection_read_ready)
 
       start_event_loop
 
       eventually do
-        expect(fake_server).to have_received_read_ready_connection
+        expect(fake_server).to have_received(:connection_read_ready).at_least(:once)
       end
 
-      fake_server.reset
+      event_loop.deregister_read(fake_server, :connection_read_ready)
+    end
 
-      connection = server.accept_nonblock # accept outstanding connection
+    it 'notifies when a write operation is ready' do
+      fake_socket = double(to_io: socket, connection_write_ready: nil)
 
-      subject.deregister_read(fake_server, :read_ready_connection)
+      event_loop.register_write(fake_socket, :connection_write_ready)
 
-      another_socket = TCPSocket.new('localhost', 9595)
+      start_event_loop
+
+      eventually do
+        expect(fake_socket).to have_received(:connection_write_ready).at_least(:once)
+      end
+
+      event_loop.deregister_write(fake_socket, :connection_write_ready)
+    end
+
+    it 'allows to deregister from a read operation' do
+      fake_server = double(to_io: server, connection_read_ready: nil)
+
+      event_loop.register_read(fake_server, :connection_read_ready)
+
+      event_loop.deregister_read(fake_server, :connection_read_ready)
+
+      start_event_loop
 
       during(timeout: 0.1) do
-        expect(fake_server).to_not have_received_read_ready_connection
+        expect(fake_server).to_not have_received(:connection_read_ready)
       end
     end
 
     it 'allows to deregister from a write operation' do
-      fake_socket = FakeIO.new(socket)
+      fake_socket = double(to_io: socket, connection_write_ready: nil)
 
-      subject.register_write(fake_socket, :write_ready_connection)
+      event_loop.register_write(fake_socket, :connection_write_ready)
+
+      event_loop.deregister_write(fake_socket, :connection_write_ready)
 
       start_event_loop
 
-      eventually { expect(fake_socket).to have_received_write_ready_connection }
-
-      fake_socket.reset
-
-      subject.deregister_write(fake_socket, :write_ready_connection)
-
       during(timeout: 0.1) do
-        expect(fake_socket).not_to have_received_write_ready_connection
+        expect(fake_socket).to_not have_received(:connection_write_ready)
       end
     end
   end
