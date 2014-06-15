@@ -145,7 +145,7 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection     = @tcp_server.accept_nonblock
-      message_stream = MessageStream.new(connection, @io_loop, @event_logger, @port)
+      message_stream = MessageStream.new(connection, @io_loop, @event_logger)
       @message_streams << message_stream
       @connection_accepted_listener.call(message_stream)
       @event_logger.log(:connection_accepted, @port)
@@ -315,18 +315,17 @@ describe 'Activity Broker' do
   end
 
   class MessageStream
-    def initialize(io, io_loop, event_logger, port)
+    def initialize(io, event_loop, event_logger)
       @io = io
-      @io_loop = io_loop
+      @event_loop = event_loop
       @event_logger = event_logger
       @read_buffer  = ''
       @write_buffer = ''
-      @port = port
     end
 
     def read(message_listener)
       @message_listener = message_listener
-      @io_loop.register_read(self, :data_received)
+      @event_loop.register_read(self, :data_received)
     end
 
     def to_io
@@ -336,13 +335,13 @@ describe 'Activity Broker' do
     def write(message)
       @write_buffer << message
       @write_buffer << CRLF
-      @io_loop.register_write(self, :ready_to_write)
+      @event_loop.register_write(self, :ready_to_write)
     end
 
     def close
       @closed = true
-      @io_loop.deregister_write(self, :ready_to_write)
-      @io_loop.deregister_read(self, :data_received)
+      @event_loop.deregister_write(self, :ready_to_write)
+      @event_loop.deregister_read(self, :data_received)
       @io.close unless @closed
     end
 
@@ -357,7 +356,7 @@ describe 'Activity Broker' do
         bytes_written = @io.write_nonblock(@write_buffer)
         @write_buffer.slice!(0, bytes_written)
         if @write_buffer.empty?
-          @io_loop.deregister_write(self, :ready_to_write)
+          @event_loop.deregister_write(self, :ready_to_write)
         end
       rescue Errno::EAGAIN
         # write would actually block
