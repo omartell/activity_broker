@@ -113,9 +113,9 @@ describe 'Activity Broker' do
   end
 
   class Server
-    def initialize(port, io_loop, event_logger)
+    def initialize(port, event_loop, event_logger)
       @port = port
-      @io_loop = io_loop
+      @event_loop = event_loop
       @event_logger = event_logger
       @message_streams = []
     end
@@ -124,7 +124,7 @@ describe 'Activity Broker' do
       @event_logger.log(:server_accepting_connections, @port)
       @tcp_server = TCPServer.new(@port)
       @connection_accepted_listener = connection_accepted_listener
-      @io_loop.register_read(self, :process_new_connection)
+      @event_loop.register_read(self, :process_new_connection)
     end
 
     def to_io
@@ -132,7 +132,7 @@ describe 'Activity Broker' do
     end
 
     def stop
-      @io_loop.deregister_read(self, :process_new_connection)
+      @event_loop.deregister_read(self, :process_new_connection)
       @message_streams.each(&:close)
       @tcp_server.close
     end
@@ -145,7 +145,7 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection     = @tcp_server.accept_nonblock
-      message_stream = MessageStream.new(connection, @io_loop, @event_logger)
+      message_stream = MessageStream.new(connection, @event_loop, @event_logger)
       @message_streams << message_stream
       @connection_accepted_listener.call(message_stream)
       @event_logger.log(:connection_accepted, @port)
