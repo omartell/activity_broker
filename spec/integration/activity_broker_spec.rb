@@ -3,6 +3,7 @@ require 'support/async_helper'
 require 'socket'
 require 'logger'
 require 'delegate'
+require_relative '../../lib/activity_broker'
 
 describe 'Activity Broker' do
   include AsyncHelper
@@ -67,7 +68,7 @@ describe 'Activity Broker' do
       @event_logger = @config.fetch(:event_logger) do
         ApplicationEventLogger.new('/tmp/activity_broker.log', Logger::INFO)
       end
-      @event_loop = EventLoop.new(@event_logger)
+      @event_loop = ActivityBroker::EventLoop.new(@event_logger)
     end
 
     def start
@@ -230,7 +231,6 @@ describe 'Activity Broker' do
   end
 
   class EventSourceMessageUnpacker
-
     EventNotification = Struct.new(:id, :type, :sender, :recipient, :message)
 
     def initialize(listener)
@@ -388,85 +388,6 @@ describe 'Activity Broker' do
     end
   end
 
-  class EventLoop
-    def initialize(event_logger)
-      @reading = []
-      @writing = []
-      @event_logger  = event_logger
-    end
-
-    def start
-      loop do
-        ready_reading, ready_writing, _ = IO.select(@reading, @writing, nil, 0)
-        ((ready_writing || []) + (ready_reading || [])).each(&:log)
-
-        if @stop
-          @event_logger.log(:shutting_down_reactor)
-          break
-        end
-      end
-    end
-
-    def register_read(listener, event = nil, &block)
-      io_listener = new_io_listener(listener, event, block)
-      if !@reading.include?(io_listener)
-        @reading << io_listener
-      end
-    end
-
-    def register_write(listener, event = nil, &block)
-      io_listener = new_io_listener(listener, event, block)
-      if !@writing.include?(io_listener)
-        @writing << io_listener
-      end
-    end
-
-    def stop
-      @stop = true
-    end
-
-    def deregister_write(listener, event = nil, &block)
-      @writing.delete(new_io_listener(listener, event, block))
-    end
-
-    def deregister_read(listener, event = nil, &block)
-      @reading.delete(new_io_listener(listener, event, block))
-    end
-
-    private
-
-    def new_io_listener(listener, event, block)
-      IOListener.new(listener, event, block)
-    end
-  end
-
-  class IOListener
-    attr_reader :listener, :event, :block
-    def initialize(listener, event, block)
-      @listener = listener
-      @event = event
-      @block = block
-    end
-
-    def to_io
-      @listener.to_io
-    end
-
-    def ==(other_io_listener)
-      self.event == other_io_listener.event &&
-      self.listener == other_io_listener.listener &&
-      self.block == other_io_listener.block
-    end
-
-    def log
-      if @event
-        @listener.send(@event)
-      else
-        @block.call(@listener)
-      end
-    end
-  end
-
   class ApplicationEventLogger
     def initialize(output, level = Logger::INFO)
       @logger = Logger.new(output)
@@ -546,7 +467,7 @@ describe 'Activity Broker' do
       log_info('handling thread interrupt')
     end
 
-    def shutting_down_reactor
+    def stopping_event_loop
       log_info('activity broker shutdown')
     end
   end
@@ -654,7 +575,7 @@ describe 'Activity Broker' do
     subscribers.each(&:stop)
     eventually { expect(subscribers.all?(&:closed?)).to eq true }
     activity_broker.stop
-    eventually { expect(test_logger.registered_event?(:shutting_down_reactor)).to eq true }
+    eventually { expect(test_logger.registered_event?(:stopping_event_loop)).to eq true }
   end
 
   specify 'A subscriber is notified of broadcast event' do
