@@ -145,7 +145,7 @@ describe 'Activity Broker' do
 
     def process_new_connection
       connection     = @tcp_server.accept_nonblock
-      message_stream = MessageStream.new(connection, @event_loop, @event_logger)
+      message_stream = ActivityBroker::MessageStream.new(connection, @event_loop, @event_logger)
       @message_streams << message_stream
       @connection_accepted_listener.call(message_stream)
       @event_logger.log(:connection_accepted, @port)
@@ -311,79 +311,6 @@ describe 'Activity Broker' do
       when 'S'
         @notification_listener.process_status_update_event(notification)
       end
-    end
-  end
-
-  class MessageStream
-    def initialize(io, event_loop, event_logger)
-      @io = io
-      @event_loop = event_loop
-      @event_logger = event_logger
-      @read_buffer  = ''
-      @write_buffer = ''
-    end
-
-    def read(message_listener)
-      @message_listener = message_listener
-      @event_loop.register_read(self, :data_received)
-    end
-
-    def to_io
-      @io
-    end
-
-    def write(message)
-      @write_buffer << message
-      @write_buffer << CRLF
-      @event_loop.register_write(self, :ready_to_write)
-    end
-
-    def close
-      @closed = true
-      @event_loop.deregister_write(self, :ready_to_write)
-      @event_loop.deregister_read(self, :data_received)
-      @io.close unless @closed
-    end
-
-    def closed?
-      @closed
-    end
-
-    private
-
-    def ready_to_write
-      begin
-        bytes_written = @io.write_nonblock(@write_buffer)
-        @write_buffer.slice!(0, bytes_written)
-        if @write_buffer.empty?
-          @event_loop.deregister_write(self, :ready_to_write)
-        end
-      rescue Errno::EAGAIN
-        # write would actually block
-      end
-    end
-
-    def data_received
-      begin
-        unless @closed
-          @read_buffer << @io.read_nonblock(4096)
-          forward_messages
-        end
-      rescue IO::WaitReadable
-        # IO isn't actually readable.
-      rescue EOFError
-        # No more data coming from the other end
-        self.close
-      end
-    end
-
-    def forward_messages
-      message_regex = /([^\/]*)\/r\/n/
-      @read_buffer.scan(message_regex).flatten.each do |m|
-        @event_logger.log(:streaming_message, m)
-        @message_listener.process_message(m, self)
-      end
-      @read_buffer = @read_buffer.gsub(message_regex, '')
     end
   end
 
