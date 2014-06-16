@@ -20,18 +20,11 @@ module AsyncHelper
     end
   end
 
-  def during(options = {})
-    timeout    = options[:timeout]   || 0.5
-    interval   = options[:interval] || 0.0001
-    time_limit = Time.now + timeout
+  def on_timeout(options = {})
+    timeout = options[:timeout]   || 0.5
 
-    loop do
-      yield
+    sleep timeout
 
-      if Time.now >= time_limit
-        return
-      end
-      sleep interval
-    end
+    yield
   end
 end

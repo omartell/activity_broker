@@ -73,7 +73,7 @@ module ActivityBroker
 
       start_event_loop
 
-      during(timeout: 0.1) do
+      on_timeout(timeout: 0.1) do
         expect(fake_server).to_not have_received(:connection_read_ready)
       end
     end
@@ -87,9 +87,31 @@ module ActivityBroker
 
       start_event_loop
 
-      during(timeout: 0.1) do
+      on_timeout(timeout: 0.1) do
         expect(fake_socket).to_not have_received(:connection_write_ready)
       end
+    end
+
+    it 'only allows to register a read-write listener once per object' do
+      server = TCPServer.new('localhost', 9494)
+      socket = TCPSocket.new('localhost', 9494)
+      fake_server = double(to_io: server).tap do |double|
+        double.stub(:connection_read_ready) { server.accept_nonblock }
+      end
+
+      event_loop.register_read(fake_server, :connection_read_ready)
+      event_loop.register_read(fake_server, :connection_read_ready)
+
+      start_event_loop
+
+      on_timeout(timeout: 0.1) do
+        expect(fake_server).to have_received(:connection_read_ready).once
+      end
+
+      event_loop.deregister_read(fake_server, :connection_read_ready)
+      @thread.kill
+      server.close
+      socket.close
     end
   end
 end
