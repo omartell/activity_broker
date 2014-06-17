@@ -3,12 +3,14 @@ module ActivityBroker
     def initialize(event_logger)
       @reading = []
       @writing = []
-      @event_logger  = event_logger
+      @event_logger = event_logger
     end
 
     def start
       loop do
         if @stop
+          @writing.each(&:on_event_loop_stop)
+          @reading.each(&:on_event_loop_stop)
           @event_logger.log(:stopping_event_loop)
           break
         end
@@ -19,12 +21,12 @@ module ActivityBroker
       end
     end
 
-    def register_read(listener, read_event)
-      register_on(@reading, listener, read_event)
+    def register_read(listener, read_event, stop_event)
+      register_on(@reading, listener, read_event, stop_event)
     end
 
-    def register_write(listener, write_event)
-      register_on(@writing, listener, write_event)
+    def register_write(listener, write_event, stop_event)
+      register_on(@writing, listener, write_event, stop_event)
     end
 
     def stop
@@ -41,15 +43,15 @@ module ActivityBroker
 
     private
 
-    def register_on(io_listeners, listener, event)
-      io_listener = new_io_listener(listener, event)
+    def register_on(io_listeners, listener, event, stop_event)
+      io_listener = new_io_listener(listener, event, stop_event)
       if !io_listeners.include?(io_listener)
         io_listeners << io_listener
       end
     end
 
-    def new_io_listener(listener, event)
-      IOListener.new(listener, event)
+    def new_io_listener(listener, event, stop_event = nil)
+      IOListener.new(listener, event, stop_event)
     end
   end
 end

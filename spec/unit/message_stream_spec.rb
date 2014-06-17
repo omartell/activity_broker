@@ -2,7 +2,7 @@ require 'spec_helper'
 module ActivityBroker
   describe MessageStream do
     class FakeEventLoop
-      def register_read(listener, event)
+      def register_read(listener, event, stop_event)
         @listener = listener
         @event = event
       end

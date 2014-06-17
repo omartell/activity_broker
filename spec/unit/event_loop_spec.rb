@@ -37,9 +37,9 @@ module ActivityBroker
     end
 
     it 'notifies when a read operation is ready' do
-      fake_server = double(to_io: server, connection_read_ready: nil)
+      fake_server = double(to_io: server, connection_read_ready: nil, on_stop: nil)
 
-      event_loop.register_read(fake_server, :connection_read_ready)
+      event_loop.register_read(fake_server, :connection_read_ready, :on_stop)
 
       start_event_loop
 
@@ -51,9 +51,9 @@ module ActivityBroker
     end
 
     it 'notifies when a write operation is ready' do
-      fake_socket = double(to_io: socket, connection_write_ready: nil)
+      fake_socket = double(to_io: socket, connection_write_ready: nil, on_stop: nil)
 
-      event_loop.register_write(fake_socket, :connection_write_ready)
+      event_loop.register_write(fake_socket, :connection_write_ready, on_stop: nil)
 
       start_event_loop
 
@@ -65,9 +65,9 @@ module ActivityBroker
     end
 
     it 'allows to deregister from a read operation' do
-      fake_server = double(to_io: server, connection_read_ready: nil)
+      fake_server = double(to_io: server, connection_read_ready: nil, on_stop: nil)
 
-      event_loop.register_read(fake_server, :connection_read_ready)
+      event_loop.register_read(fake_server, :connection_read_ready, on_stop: nil)
 
       event_loop.deregister_read(fake_server, :connection_read_ready)
 
@@ -79,9 +79,9 @@ module ActivityBroker
     end
 
     it 'allows to deregister from a write operation' do
-      fake_socket = double(to_io: socket, connection_write_ready: nil)
+      fake_socket = double(to_io: socket, connection_write_ready: nil, on_stop: nil)
 
-      event_loop.register_write(fake_socket, :connection_write_ready)
+      event_loop.register_write(fake_socket, :connection_write_ready, on_stop: nil)
 
       event_loop.deregister_write(fake_socket, :connection_write_ready)
 
@@ -99,8 +99,8 @@ module ActivityBroker
         double.stub(:connection_read_ready) { server.accept_nonblock }
       end
 
-      event_loop.register_read(fake_server, :connection_read_ready)
-      event_loop.register_read(fake_server, :connection_read_ready)
+      event_loop.register_read(fake_server, :connection_read_ready, on_stop: nil)
+      event_loop.register_read(fake_server, :connection_read_ready, on_stop: nil)
 
       start_event_loop
 

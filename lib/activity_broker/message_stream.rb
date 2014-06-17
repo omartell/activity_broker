@@ -11,28 +11,28 @@ module ActivityBroker
 
     def read(message_listener)
       @message_listener = message_listener
-      @event_loop.register_read(self, :data_received)
+      @event_loop.register_read(self, :data_received, :close_reading)
+    end
+
+    def write(message)
+      @write_buffer << message
+      @write_buffer << CRLF
+      @event_loop.register_write(self, :ready_to_write, :close_writting)
     end
 
     def to_io
       @io
     end
 
-    def write(message)
-      @write_buffer << message
-      @write_buffer << CRLF
-      @event_loop.register_write(self, :ready_to_write)
+    private
+
+    def close_writing
+      @io.close_write
     end
 
-    def close
-      return if @closed
-      @event_loop.deregister_write(self, :ready_to_write)
-      @event_loop.deregister_read(self, :data_received)
-      @io.close
-      @closed = true
+    def close_reading
+      @io.close_read
     end
-
-  private
 
     def ready_to_write
       begin
@@ -48,7 +48,6 @@ module ActivityBroker
 
     def data_received
       begin
-        # do we really need to have closed guard?
         @read_buffer << @io.read_nonblock(4096)
         stream_messages
       rescue IO::WaitReadable
