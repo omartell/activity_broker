@@ -23,7 +23,7 @@ module ActivityBroker
 
     after(:each) do
       event_loop.stop
-      @thread.kill
+      @thread.kill if @thread
     end
 
     before(:all) do
@@ -96,7 +96,7 @@ module ActivityBroker
       server = TCPServer.new('localhost', 9494)
       socket = TCPSocket.new('localhost', 9494)
       fake_server = double(to_io: server).tap do |double|
-        double.stub(:connection_read_ready) { server.accept_nonblock }
+        allow(double).to receive(:connection_read_ready) { server.accept_nonblock }
       end
 
       event_loop.register_read(fake_server, :connection_read_ready, on_stop: nil)
