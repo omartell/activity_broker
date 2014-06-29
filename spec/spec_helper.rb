@@ -5,6 +5,10 @@
 #
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 require_relative '../lib/activity_broker'
+require_relative 'support/fake_event_source'
+require_relative 'support/fake_subscriber'
+require_relative 'support/test_event_logger'
+
 RSpec.configure do |config|
   config.run_all_when_everything_filtered = true
   config.fail_fast = true
