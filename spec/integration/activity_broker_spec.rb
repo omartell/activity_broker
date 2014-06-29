@@ -18,27 +18,27 @@ describe 'Activity Broker' do
     end
 
     def start
-      @connection = Socket.tcp(@host, @port)
+      @connection = TCPSocket.new(@host, @port)
     end
 
-    def publish_broadcast_event(id: nil)
-      publish_event('B', id)
+    def publish_broadcast_event(options = {})
+      publish_event('B', options[:id])
     end
 
-    def publish_new_follower_to(recipient, sender, id: nil)
-      publish_event('F', sender, recipient, id)
+    def publish_new_follower_to(recipient, sender, options = {})
+      publish_event('F', sender, recipient, options[:id])
     end
 
-    def publish_status_update_from(sender, id: nil)
-      publish_event('S', sender, id)
+    def publish_status_update_from(sender, options = {})
+      publish_event('S', sender, options[:id])
     end
 
-    def publish_private_message_to(recipient, sender, id: nil)
-      publish_event('P', sender, recipient, id)
+    def publish_private_message_to(recipient, sender, options = {})
+      publish_event('P', sender, recipient, options[:id])
     end
 
-    def publish_unfollow_to(recipient, sender, id: nil)
-      publish_event('U', sender, recipient,  id)
+    def publish_unfollow_to(recipient, sender, options = {})
+      publish_event('U', sender, recipient, options[:id])
     end
 
     def stop
@@ -62,348 +62,41 @@ describe 'Activity Broker' do
     end
   end
 
-  class ApplicationRunner
-    def initialize(config)
-      @config = config
-      @event_logger = @config.fetch(:event_logger) do
-        ApplicationEventLogger.new('/tmp/activity_broker.log', Logger::INFO)
-      end
-      @event_loop = ActivityBroker::EventLoop.new(@event_logger)
-    end
+  class TestEventLogger < ActivityBroker::ApplicationEventLogger
 
-    def start
-      @event_source_server = start_server_on(:event_source_port)
-      @subscriber_server   = start_server_on(:subscriber_port)
-      notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
-      notification_translator = NotificationTranslator.new(notification_router)
-      notification_ordering   = NotificationOrdering.new(notification_translator)
-      message_unpacker        = EventSourceMessageUnpacker.new(notification_ordering)
-
-      @event_source_server.accept_connections do |message_stream|
-        message_stream.read(message_unpacker)
-      end
-
-      subscriber_translator = SubscriberMessageTranslator.new(notification_router)
-      @subscriber_server.accept_connections do |message_stream|
-        message_stream.read(subscriber_translator)
-      end
-
-      trap_signal
-      @event_loop.start
-    end
-
-    def stop
-      @event_loop.stop
-    end
-
-    def trap_signal
-      trap(:INT) do
-        stop
-        exit
-      end
-    end
-
-    private
-
-    def start_server_on(port)
-      Server.new(@config.fetch(port), @event_loop, @event_logger)
-    end
-  end
-
-  class Server
-    def initialize(port, event_loop, event_logger)
-      @port = port
-      @event_loop = event_loop
-      @event_logger = event_logger
-      @message_streams = []
-    end
-
-    def accept_connections(&connection_accepted_listener)
-      @event_logger.log(:server_accepting_connections, @port)
-      @tcp_server = TCPServer.new(@port)
-      @connection_accepted_listener = connection_accepted_listener
-      @event_loop.register_read(self, :process_new_connection, :close_server)
-    end
-
-    def to_io
-      @tcp_server
-    end
-
-    private
-
-    def close_server
-      @tcp_server.close
-    end
-
-    def process_new_connection
-      connection     = @tcp_server.accept_nonblock
-      message_stream = ActivityBroker::MessageStream.new(connection, @event_loop, @event_logger)
-
-      @connection_accepted_listener.call(message_stream)
-      @event_logger.log(:connection_accepted, @port)
-    end
-  end
-
-  class NotificationDelivery
-    def initialize
-      @subscribers = {}
-    end
-
-    def add_subscriber(subscriber_id, subscriber_stream)
-      @subscribers[subscriber_id] = subscriber_stream
-    end
-
-    def deliver_message_to(recipient, message)
-      if subscriber_stream = @subscribers[recipient]
-        subscriber_stream.write(message)
-      end
-    end
-
-    def deliver_message_to_everyone(message)
-      @subscribers.each do |subscriber_id, subscriber_stream|
-        subscriber_stream.write(message)
-      end
-    end
-  end
-
-  class NotificationRouter
-    def initialize(notification_delivery, event_logger)
-      @followers = Hash.new { |hash, key| hash[key] = [] }
-      @delivery = notification_delivery
-      @event_logger = event_logger
-    end
-
-    def register_subscriber(subscriber_id, subscriber_stream)
-      @delivery.add_subscriber(subscriber_id, subscriber_stream)
-      log(:registering_subscriber, subscriber_id)
-    end
-
-    def process_broadcast_event(notification)
-      @delivery.deliver_message_to_everyone(notification.message)
-      log(:forwarding_broadcast_event, notification)
-    end
-
-    def process_follow_event(notification)
-      add_follower(notification.sender, notification.recipient)
-      @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_follow_event, notification)
-    end
-
-    def process_unfollow_event(notification)
-      remove_follower(notification.sender, notification.recipient)
-      @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_unfollow_event, notification)
-    end
-
-    def process_status_update_event(notification)
-      @followers.fetch(notification.sender).each do |follower|
-        @delivery.deliver_message_to(follower, notification.message)
-      end
-      log(:forwarding_status_update, notification)
-    end
-
-    def process_private_message_event(notification)
-      @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_private_message, notification)
-    end
-
-    private
-
-    def log(event, notification)
-      @event_logger.log(event, notification)
-    end
-
-    def remove_follower(follower, followed)
-      @followers[followed] = @followers[followed] - [follower]
-    end
-
-    def add_follower(follower, followed)
-      @followers[followed] << follower
-    end
-  end
-
-  class EventSourceMessageUnpacker
-    EventNotification = Struct.new(:id, :type, :sender, :recipient, :message)
-
-    def initialize(listener)
-      @listener = listener
-    end
-
-    def process_message(message, source_event_stream)
-      id, type, sender, recipient = message.split('|')
-      notification = EventNotification.new(id.to_i, type, sender, recipient, message)
-      @listener.process_notification(notification)
-    end
-  end
-
-  class NotificationOrdering
-    def initialize(next_notification_listener)
-      @next_notification_listener = next_notification_listener
-      @last_notification = nil
-      @notification_queue = []
-    end
-
-    def process_notification(current_notification)
-      if is_this_the_next_notification?(current_notification)
-        forward_notification(current_notification)
-        @notification_queue.sort! { |x, y| y.id <=> x.id }
-        process_queued_notifications
-      else
-        @notification_queue << current_notification
-      end
-    end
-
-    private
-
-    def process_queued_notifications
-      notification = @notification_queue.shift
-      if notification && is_this_the_next_notification?(notification)
-        forward_notification(notification)
-        process_queued_notifications
-      elsif notification
-        @notification_queue.unshift(notification)
-      end
-    end
-
-    def forward_notification(notification)
-      @next_notification_listener.process_notification(notification)
-      @last_notification = notification
-    end
-
-    def is_this_the_next_notification?(next_notification)
-      @last_notification.nil? || (next_notification.id - @last_notification.id) == 1
-    end
-  end
-
-  class SubscriberMessageTranslator
-    def initialize(translated_message_listener)
-      @translated_message_listener = translated_message_listener
-    end
-
-    def process_message(message, subscriber_stream)
-      @translated_message_listener.register_subscriber(message, subscriber_stream)
-    end
-  end
-
-  class NotificationTranslator
-    def initialize(notification_listener)
-      @notification_listener = notification_listener
-    end
-
-    def process_notification(notification)
-      case notification.type
-      when 'B'
-        @notification_listener.process_broadcast_event(notification)
-      when 'F'
-        @notification_listener.process_follow_event(notification)
-      when 'U'
-        @notification_listener.process_unfollow_event(notification)
-      when 'P'
-        @notification_listener.process_private_message_event(notification)
-      when 'S'
-        @notification_listener.process_status_update_event(notification)
-      end
-    end
-  end
-
-  class ApplicationEventLogger
-    def initialize(output, level = Logger::INFO)
-      @logger = Logger.new(output)
-      @logger.datetime_format = "%Y-%m-%d %H:%M:%S"
-      @logger.level = level
+    def initialize(output, level = Logger::DEBUG)
       @events = []
+      super(output, level)
+    end
+
+    def has_received_event?(event, *other)
+      event_data = [event] + other
+      @events.include?(event_data)
     end
 
     def log(event, *other)
-      @events << event
-      send(event, *other)
+      @events << ([event] + other)
+      super(event, *other)
     end
-
-    def registered_event?(event)
-      @events.include?(event)
-    end
-
-    private
-
-    def log_info(message)
-      @logger.info(message)
-    end
-
-    def server_accepting_connections(port)
-      log_info('server accepting connections on port ' + port.to_s)
-    end
-
-    def connection_accepted(port)
-      log_info('connection accepted on port ' + port.to_s)
-    end
-
-    def streaming_message(message)
-      log_info('streaming message ' + message)
-    end
-
-    def registering_subscriber(subscriber_id)
-      log_info('registering subscriber ' + subscriber_id)
-    end
-
-    def forwarding_broadcast_event(notification)
-      log_info('forwarding broadcast event: ' + notification.message)
-    end
-
-    def forwarding_follow_event(notification)
-      log_info('forwarding follow event: ' + notification.message)
-    end
-
-    def forwarding_unfollow_event(notification)
-      log_info('forwarding unfollow event: ' + notification.message)
-    end
-
-    def forwarding_status_update(notification)
-      log_info('forwarding status update: ' + notification.message)
-    end
-
-    def forwarding_private_message(notification)
-      log_info('forwarding private message: ' + notification.message)
-    end
-
-    def stopping_server(port)
-      log_info('stopping server on port ' + port.to_s)
-    end
-
-    def stopping_event_source(port)
-      log_info('stopping event source on port ' + port.to_s)
-    end
-
-    def stopping_subscriber(client_id, port)
-      log_info('stopping subscriber ' + client_id + ' on port ' + port.to_s )
-    end
-
-    def received_interrupt_signal
-      log_info('interrupting execution')
-    end
-
-    def handling_thread_interrupt
-      log_info('handling thread interrupt')
-    end
-
-    def stopping_event_loop
-      log_info('activity broker shutdown')
-    end
-  end
-
-  class TestEventLogger < ApplicationEventLogger
-
-    private
 
     def publishing_event(message)
-      log_info('publishing event: ' + message)
+      log_debug('publishing event: ' + message)
     end
 
     def sending_subscriber_id(subscriber_id)
-      log_info('sending subscriber id: ' + subscriber_id)
+      log_debug('sending subscriber id: ' + subscriber_id)
     end
 
     def receiving_notification(notification, subscriber_id)
-      log_info(subscriber_id + ' received notification: ' + notification)
+      log_debug(subscriber_id + ' received notification: ' + notification)
+    end
+
+    def stopping_event_source(port)
+      log_debug('stopping event source on port ' + port.to_s)
+    end
+
+    def stopping_subscriber(client_id, port)
+      log_debug('stopping subscriber ' + client_id + ' on port ' + port.to_s )
     end
   end
 
@@ -418,7 +111,7 @@ describe 'Activity Broker' do
 
     def start
       begin
-        @connection = Socket.tcp(@address, @port)
+        @connection = TCPSocket.new(@address, @port)
       rescue Errno::ECONNREFUSED
         retry
       end
@@ -466,10 +159,10 @@ describe 'Activity Broker' do
     end
   end
 
-  let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::INFO)  }
+  let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::DEBUG)  }
   let!(:event_source) { FakeEventSource.new('0.0.0.0', 4484, test_logger) }
   let!(:activity_broker) do
-    ApplicationRunner.new({ event_source_port: 4484,
+    ActivityBroker::ApplicationRunner.new({ event_source_port: 4484,
                             subscriber_port: 4485,
                             event_logger: test_logger })
   end
@@ -485,15 +178,19 @@ describe 'Activity Broker' do
       subscriber.start
       subscriber.send_client_id
       subscribers << subscriber
+      wait_until do
+        expect(test_logger).to have_received_event(:registering_subscriber, id)
+      end
     end
   end
 
   after do
     event_source.stop
     subscribers.each(&:stop)
-    eventually { expect(subscribers.all?(&:closed?)).to eq true }
     activity_broker.stop
-    eventually { expect(test_logger.registered_event?(:stopping_event_loop)).to eq true }
+    wait_until do
+      expect(test_logger).to have_received_event(:stopping_event_loop)
+    end
   end
 
   specify 'A subscriber is notified of broadcast event' do
@@ -573,7 +270,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Unfollowed notification is forwarded to subscriber' do
+  specify 'Unfollowed notifications are not forwarded to subscribers' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -586,7 +283,8 @@ describe 'Activity Broker' do
     alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
 
     eventually do
-      expect(bob).to have_received_notification_of(alice_unfollowed_bob)
+      expect(test_logger).to have_received_event(:discarding_unfollow_event,
+                                                 alice_unfollowed_bob)
     end
   end
 

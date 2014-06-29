@@ -20,6 +20,10 @@ module AsyncHelper
     end
   end
 
+  def wait_until(options = {}, &block)
+    eventually(options, &block)
+  end
+
   def on_timeout(options = {})
     timeout = options[:timeout]   || 0.5
 
