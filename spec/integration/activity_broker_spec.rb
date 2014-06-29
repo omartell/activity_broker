@@ -38,20 +38,6 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'A subscriber is notified of broadcast event' do
-    start_activity_broker
-
-    bob = start_subscriber('bob')
-
-    event_source.start
-
-    broadcast = event_source.publish_broadcast_event
-
-    eventually do
-      expect(bob).to have_received_notification_of(broadcast)
-    end
-  end
-
   specify 'Multiple subscribers are notified of broadcast event' do
     start_activity_broker
 
