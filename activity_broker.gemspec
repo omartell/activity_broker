@@ -8,9 +8,7 @@ Gem::Specification.new do |spec|
   spec.version       = ActivityBroker::VERSION
   spec.authors       = ["Oliver Martell"]
   spec.email         = ["oliver.martell@gmail.com"]
-  spec.summary       = %q{TODO: Write a short summary. Required.}
-  spec.description   = %q{TODO: Write a longer description. Optional.}
-  spec.homepage      = ""
+  spec.summary       = %q{Twitter like notifications, TCP Sockets, Event loops and more}
   spec.license       = "MIT"
 
   spec.files         = `git ls-files -z`.split("\x0")
