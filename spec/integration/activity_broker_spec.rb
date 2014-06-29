@@ -38,7 +38,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Multiple subscribers are notified of broadcast event' do
+  specify 'Subscribers are notified of broadcast event' do
     start_activity_broker
 
     subscribers = 10.times.map do |id|
@@ -56,22 +56,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'A subscriber is notified of new follower' do
-    start_activity_broker
-
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
-
-    event_source.start
-
-    new_follower = event_source.publish_new_follower_to('bob', 'alice')
-
-    eventually do
-      expect(bob).to have_received_notification_of(new_follower)
-    end
-  end
-
-  specify 'Multiple subscribers are notified of new followers' do
+  specify 'Subscribers are notified of new followers' do
     start_activity_broker
 
     bob     = start_subscriber('bob')
@@ -101,7 +86,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Unfollowed notifications are not forwarded to subscribers' do
+  specify 'Subscribers are not notified when people stop following them' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -119,7 +104,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Subscriber is notified of a private message' do
+  specify 'Subscribers are notified of private messages' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -134,7 +119,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Followers are notified of status updates from the users they follow' do
+  specify 'Followers are notified of status updates from users they follow' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -154,7 +139,7 @@ describe 'Activity Broker' do
     end
   end
 
-  xspecify 'A subscriber no longer receive updates from a user after unfollowing' do
+  xspecify 'A subscriber no longer receive updates after unfollowing' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -178,7 +163,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Subscribers receive event notifications in order' do
+  specify 'Subscribers receive notifications in order' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -206,7 +191,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Event notifications are ignored if subscriber is not connected' do
+  specify 'Event notifications are ignored if recipient subscriber is not connected' do
     start_activity_broker
 
     bob = start_subscriber('bob')
