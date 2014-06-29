@@ -139,7 +139,7 @@ describe 'Activity Broker' do
     end
   end
 
-  xspecify 'A subscriber no longer receive updates after unfollowing' do
+  specify 'A subscriber no longer receive updates after unfollowing' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -154,11 +154,16 @@ describe 'Activity Broker' do
       expect(alice).to have_received_notification_of(bob_status_update)
     end
 
-    event_source.publish_unfollow_to('bob', 'alice')
+    alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
+
+    eventually do
+      expect(test_logger).to have_received_event(:discarding_unfollow_event,
+                                                 alice_unfollowed_bob)
+    end
+
     new_bob_status_update = event_source.publish_status_update_from('bob')
 
     eventually do
-      # check that it really hasnt received notification
       expect(alice).not_to have_received_notification_of(new_bob_status_update)
     end
   end
