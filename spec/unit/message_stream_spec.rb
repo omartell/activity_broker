@@ -30,7 +30,7 @@ module ActivityBroker
     let!(:one_message) { '1|U|sender|recipient' }
 
     it 'buffers messages from event source and streams them to the message listener' do
-      fake_io.stub(read_nonblock: "1|U|sender|recipient" + MessageStream::CRLF + "2|U|sender")
+      fake_io.stub(read_nonblock: "1|U|sender|recipient" + MessageStream::MESSAGE_BOUNDARY + "2|U|sender")
 
       message_stream.read(message_listener)
 
@@ -46,7 +46,7 @@ module ActivityBroker
       message_stream.write(one_message)
       message_stream.write(one_message)
 
-      expected_message = (one_message + MessageStream::CRLF) * 3
+      expected_message = (one_message + MessageStream::MESSAGE_BOUNDARY) * 3
 
       expect(fake_io).to receive(:write_nonblock)
         .with(expected_message)
@@ -54,7 +54,7 @@ module ActivityBroker
 
       event_loop.notify_write_event
 
-      expected_message = one_message + MessageStream::CRLF
+      expected_message = one_message + MessageStream::MESSAGE_BOUNDARY
 
       expect(fake_io).to receive(:write_nonblock)
         .with(expected_message)
@@ -74,7 +74,7 @@ module ActivityBroker
     end
 
     it 'deregisters write listener when there\'s nothing left to write' do
-      fake_io.stub(write_nonblock: (one_message + MessageStream::CRLF).bytesize)
+      fake_io.stub(write_nonblock: (one_message + MessageStream::MESSAGE_BOUNDARY).bytesize)
 
       message_stream.write(one_message)
 

@@ -1,13 +1,9 @@
 require 'spec_helper'
 require 'support/async_helper'
-require 'socket'
-require 'logger'
-require 'delegate'
 require_relative '../../lib/activity_broker'
 
 describe 'Activity Broker' do
   include AsyncHelper
-  CRLF = '/r/n'
 
   class FakeEventSource
     def initialize(host, port, event_logger)
@@ -53,7 +49,7 @@ describe 'Activity Broker' do
       full_message = notification_args.join('|')
       @event_logger.log(:publishing_event, full_message)
       @connection.write(full_message)
-      @connection.write(CRLF)
+      @connection.write(ActivityBroker::MessageStream::MESSAGE_BOUNDARY)
       full_message
     end
 
@@ -123,7 +119,7 @@ describe 'Activity Broker' do
 
     def send_client_id
       @connection.write(@client_id)
-      @connection.write(CRLF)
+      @connection.write(ActivityBroker::MessageStream::MESSAGE_BOUNDARY)
       @event_logger.log(:sending_subscriber_id, @client_id)
     end
 
@@ -148,7 +144,7 @@ describe 'Activity Broker' do
       if read_ready
         begin
           buffer = read_ready.first.read_nonblock(4096)
-          buffer.split(CRLF).each do |notification|
+          buffer.split(ActivityBroker::MessageStream::MESSAGE_BOUNDARY).each do |notification|
             @event_logger.log(:receiving_notification, notification, @client_id)
             @notifications << notification
           end

@@ -1,6 +1,6 @@
 module ActivityBroker
   class MessageStream
-    CRLF = '/r/n'
+    MESSAGE_BOUNDARY = "\n"
     def initialize(io, event_loop, event_logger)
       @io = io
       @event_loop = event_loop
@@ -16,7 +16,7 @@ module ActivityBroker
 
     def write(message)
       @write_buffer << message
-      @write_buffer << CRLF
+      @write_buffer << MESSAGE_BOUNDARY
       @event_loop.register_write(self, :ready_to_write, :close_writting)
     end
 
@@ -59,7 +59,7 @@ module ActivityBroker
     end
 
     def stream_messages
-      message_regex = /([^\/]*)\/r\/n/
+      message_regex = /([^\n]*)\n/
       @read_buffer.scan(message_regex).flatten.each do |m|
         @event_logger.log(:streaming_message, m)
         @message_listener.process_message(m, self)
