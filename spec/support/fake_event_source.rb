@@ -1,4 +1,6 @@
 class FakeEventSource
+  # This class is used in integration tests to play the role of the
+  # event source that publishes notifications to subscribers.
   def initialize(host, port, event_logger)
     @host = host
     @port = port

@@ -1,4 +1,7 @@
 class FakeSubscriber
+  # This class is used in integration tests to play the role of
+  # a subscriber connected to the application. The tests then check if
+  # notifications were delivered correctly by the activity broker.
   def initialize(client_id, address, port, event_logger)
     @client_id = client_id
     @address = address
@@ -13,10 +16,6 @@ class FakeSubscriber
     rescue Errno::ECONNREFUSED
       retry
     end
-  end
-
-  def closed?
-    @connection.closed?
   end
 
   def send_client_id

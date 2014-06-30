@@ -3,7 +3,7 @@ module ActivityBroker
   # application. Listener objects can register read/write interest
   # on IO objects. The event loop is in charge of notifying the listener
   # objects when their registered IO object is ready to be read from
-  # or written to. Internally, this class uses ruby's IO select to
+  # or written to. Internally this class uses ruby's IO select to
   # allow for non-blocking program execution.
   class EventLoop
     def initialize(event_logger)

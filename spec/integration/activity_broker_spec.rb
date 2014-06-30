@@ -4,12 +4,13 @@ require_relative '../../lib/activity_broker'
 
 describe 'Activity Broker' do
   include AsyncHelper
+
   let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::DEBUG)  }
   let!(:event_source) { FakeEventSource.new('0.0.0.0', 4484, test_logger) }
   let!(:activity_broker) do
     ActivityBroker::ApplicationRunner.new({ event_source_port: 4484,
-                            subscriber_port: 4485,
-                            event_logger: test_logger })
+                                            subscriber_port: 4485,
+                                            event_logger: test_logger })
   end
   let!(:subscribers) { [ ] }
 
