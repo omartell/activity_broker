@@ -1,5 +1,9 @@
 require 'socket'
 module ActivityBroker
+  # This class registers itself with the Event Loop to read from the TCP Server
+  # instance. The event loop will then notify when a new
+  # connection is ready to be accepted. After the server accepts the
+  # connection it will call the listener block with an instance of MessageStream.
   class Server
     def initialize(port, event_loop, event_logger)
       @port = port

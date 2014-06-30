@@ -1,5 +1,9 @@
 module ActivityBroker
   class NotificationTranslator
+    # The main job of this class is to translate a general
+    # notification into a more specific notification that is then
+    # passed to the object interested in receiving the specific
+    # notification types.
     def initialize(notification_listener)
       @notification_listener = notification_listener
     end

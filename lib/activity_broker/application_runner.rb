@@ -1,10 +1,14 @@
 module ActivityBroker
+  # This is the application starting point. The class takes
+  # the event source port, subscriber port and an application event
+  # logger as configuration parameters, bootstraps all the components
+  # and starts accepting TCP connections from the event source and
+  # subscribers. Then the runner kicks off the notification processing by
+  # starting the main IO event loop.
   class ApplicationRunner
     def initialize(config)
       @config = config
-      @event_logger = @config.fetch(:event_logger) do
-        ApplicationEventLogger.new(STDOUT, Logger::INFO)
-      end
+      @event_logger = @config.fetch(:event_logger) { ApplicationEventLogger.new(STDOUT, Logger::INFO) }
       @event_loop = EventLoop.new(@event_logger)
     end
 
@@ -12,7 +16,6 @@ module ActivityBroker
       @event_source_server = start_server_on(:event_source_port)
       @subscriber_server   = start_server_on(:subscriber_port)
       notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
-
       notification_translator = NotificationTranslator.new(notification_router)
       notification_ordering   = NotificationOrdering.new(notification_translator, @event_logger)
       message_unpacker        = EventSourceMessageUnpacker.new(notification_ordering)

@@ -1,4 +1,6 @@
 module ActivityBroker
+  # This class is in charge of delivering a message to a specific
+  # subscriber.
   class NotificationDelivery
     def initialize
       @subscribers = {}

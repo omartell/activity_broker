@@ -1,5 +1,10 @@
 module ActivityBroker
   class NotificationRouter
+    # The notification router is in charge of forwarding the
+    # notifications to the appropriate subscribers based on the
+    # notification received. It also keeps track of the current
+    # subscribers followers and uses an instance of
+    # NotificationDelivery to write the messages to the subscribers.
     def initialize(notification_delivery, event_logger)
       @followers = Hash.new { |hash, key| hash[key] = [] }
       @delivery  = notification_delivery

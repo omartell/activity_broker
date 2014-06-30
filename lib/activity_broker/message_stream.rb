@@ -1,4 +1,8 @@
 module ActivityBroker
+  # Wrapper class around the TCP socket object for non blocking writes and
+  # reads. This class is also responsible for handling message
+  # boundaries on both reads and writes. After reading a
+  # complete message it tells the message listener to process the message.
   class MessageStream
     MESSAGE_BOUNDARY = "\n"
     def initialize(io, event_loop, event_logger)

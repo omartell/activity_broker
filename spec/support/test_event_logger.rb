@@ -1,4 +1,8 @@
 class TestEventLogger < ActivityBroker::ApplicationEventLogger
+  # This class delegates logging to the parent Application Event Logger and
+  # it's also used in integration tests to collect application events,
+  # wait for a certain event to synchronize the tests and assert that a certain action
+  # has happened in the application.
   def initialize(output, level = Logger::DEBUG)
     @events = []
     super(output, level)

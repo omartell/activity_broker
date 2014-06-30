@@ -1,7 +1,10 @@
 module ActivityBroker
   class NotificationOrdering
-    def initialize(next_notification_listener, event_logger)
-      @next_notification_listener = next_notification_listener
+    # This class enqueues notifications and then forwards them in order
+    # to the notification listener. The notifications are ordered
+    # by id - the first notification starts with id 1.
+    def initialize(notification_listener, event_logger)
+      @notification_listener = notification_listener
       @last_notification = nil
       @notification_queue = []
       @event_logger = event_logger
@@ -30,7 +33,7 @@ module ActivityBroker
     end
 
     def forward_notification(notification)
-      @next_notification_listener.process_notification(notification)
+      @notification_listener.process_notification(notification)
       @last_notification = notification
     end
 

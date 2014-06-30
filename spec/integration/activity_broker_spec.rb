@@ -139,7 +139,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'A subscriber no longer receive updates after unfollowing' do
+  specify 'A subscriber no longer receives updates after unfollowing' do
     start_activity_broker
 
     bob   = start_subscriber('bob')
@@ -196,7 +196,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Event notifications are ignored if recipient subscriber is not connected' do
+  specify 'Event notifications are ignored if subscriber is not connected' do
     start_activity_broker
 
     bob = start_subscriber('bob')

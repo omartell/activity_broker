@@ -1,5 +1,8 @@
 module ActivityBroker
   class EventSourceMessageUnpacker
+    # This class is in charge of converting the messages from the
+    # message stream into event notifications, which are
+    # forwarded to the notification listener.
     def initialize(notification_listener)
       @notification_listener = notification_listener
     end

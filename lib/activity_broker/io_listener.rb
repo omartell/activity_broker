@@ -1,4 +1,8 @@
 module ActivityBroker
+  # This class is mainly used to group the listener object that
+  # registered interest on the IO object, the event to be triggered when
+  # the IO object is ready for read/write and the stop event dispached
+  # when the application is about to shutdown.
   class IOListener
     attr_reader :listener, :io_event
     def initialize(listener, io_event, stop_event = nil)
