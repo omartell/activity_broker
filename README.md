@@ -1,29 +1,27 @@
-# ActivityBroker
+# Activity Broker
+The Activity Broker forwards event notifications in order from an event source to the appropriate subscribers.
 
-TODO: Write a gem description
-
-## Installation
-
-Add this line to your application's Gemfile:
-
-    gem 'activity_broker'
-
-And then execute:
-
-    $ bundle
-
-Or install it yourself as:
-
-    $ gem install activity_broker
+<img src="http://cl.ly/image/1a3J0g2B3w1L/Screen%20Shot%202014-07-01%20at%2008.39.40.png">
 
 ## Usage
 
-TODO: Write usage instructions here
+The application was developed and tested using Ruby 2.1.2.
+    
+Install gems
+    
+    bundle install
+    
+Run the application
+    
+    ruby bin/activity_broker --event_source_port 9090 --subscriber_port 9099
 
-## Contributing
+## Concepts
 
-1. Fork it ( http://github.com/<my-github-username>/activity_broker/fork )
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Add some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Create new Pull Request
+Application Runner
+
+  This is the application starting point. The class takes
+  the event source port, subscriber port and an application event
+  logger as configuration parameters, bootstraps all the components
+  and starts accepting TCP connections from the event source and
+  subscribers. Then the runner kicks off the notification processing by
+  starting the main IO event loop.
