@@ -48,7 +48,7 @@ This class registers itself with the Event Loop to read from the TCP Server inst
 
 [**Message Stream**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/message_stream.rb)
 
-Wrapper class around the TCP socket object for non blocking writes and eads. This class is also responsible for handling message boundaries on both reads and writes. After reading a complete message it tells the message listener to process the message.
+Wrapper class around the TCP socket object for non blocking writes and reads. This class is also responsible for handling message boundaries on both reads and writes. After reading a complete message it tells the message listener to process the message.
 
 [**Event Source Message Unpacker**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/event_source_message_unpacker.rb)
 
@@ -84,9 +84,9 @@ The Application Event Logger receives application events forwarded by all the ap
 - [All subscribers are notified of broadcast event](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
 - [Subscribers are notified of new followers](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L62)
 - [Subscribers are not notified when people stop following them](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L92)
-- [A subscriber no longer receives updates after unfollowing](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L114)
+- [A subscriber no longer receives updates after unfollowing](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L149)
 - [Followers are notified of status updates from users they follow](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L129)
-- [Subscribers are notified of private messages](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L149)
+- [Subscribers are notified of private messages](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L114)
 - [Subscribers receive notifications in order](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L179)
 - [Event notifications are ignored if subscriber is not connected](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L207)
 
