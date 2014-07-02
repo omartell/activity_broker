@@ -92,7 +92,7 @@ module ActivityBroker
       end
     end
 
-    it 'only allows to register a read-write listener once per object' do
+    it 'only allows to register a read-write listener once' do
       server = TCPServer.new('localhost', 9494)
       socket = TCPSocket.new('localhost', 9494)
       fake_server = double(to_io: server).tap do |double|

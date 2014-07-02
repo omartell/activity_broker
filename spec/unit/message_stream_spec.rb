@@ -29,7 +29,7 @@ module ActivityBroker
     let!(:message_listener) { double(:process_message) }
     let!(:one_message) { '1|U|sender|recipient' }
 
-    it 'buffers messages from event source and streams them to the message listener' do
+    it 'streams complete messages to the message listener' do
       fake_io.stub(read_nonblock: "1|U|sender|recipient" + MessageStream::MESSAGE_BOUNDARY + "2|U|sender")
 
       message_stream.read(message_listener)
@@ -40,7 +40,7 @@ module ActivityBroker
       event_loop.notify_read_event
     end
 
-    it 'buffers outgoing messages and writes them in the right format' do
+    it 'writes messages with the right format' do
       # Try to write 3 messages
       message_stream.write(one_message)
       message_stream.write(one_message)
