@@ -41,7 +41,7 @@ describe 'Activity Broker' do
     end
   end
 
-  specify 'Subscribers are notified of broadcast event' do
+  specify 'All subscribers are notified of broadcast event' do
     start_activity_broker
 
     subscribers = 10.times.map do |id|

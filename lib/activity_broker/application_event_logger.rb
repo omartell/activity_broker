@@ -2,8 +2,8 @@ require 'logger'
 module ActivityBroker
   # The Application Event Logger receives application events forwarded by
   # all the application components and decides if those
-  # events should be logged and how they should be logged, which is
-  # useful for debugging purposes.
+  # events should be logged and how they should be logged.
+  # This class was used for debugging purposes and integration testing.
   class ApplicationEventLogger
     def initialize(output, level)
       @logger = Logger.new(output)
