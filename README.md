@@ -60,6 +60,9 @@ This class enqueues notifications and then forwards them in order to the notific
 
 The main job of this class is to translate a general notification into a more specific notification that is then passed to the object interested in receiving the specific notification types.
 
+[**Subscriber Message Translator**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/subscriber_message_translator.rb)
+This class knows that the only message coming from a subscriber is the subscription message. So, when a message arrives it tells the translated message listener to register the subscriber.
+
 [**Notification Router**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/notification_router.rb)
 
 The notification router is in charge of forwarding the notifications to the appropriate subscribers based on the notification received. It also keeps track of the current subscribers followers and uses an instance of NotificationDelivery to write the messages to the subscribers.
@@ -70,7 +73,7 @@ This class is in charge of delivering a message to a specific subscriber.
 
 [**Application Event Logger**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/application_event_logger.rb)
 
-The Application Event Logger receives application events forwarded by all the application components and decides if those events should be logged and how they should be logged. This was used for debugging purposes and integration testing.
+The Application Event Logger receives application events forwarded by all the application components and decides if those events should be logged and how they should be logged. This class was used for debugging purposes and integration testing.
 
 ## Feature Tests
 
