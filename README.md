@@ -23,14 +23,14 @@ Run the application
 This is a high level, simplified picture of how the data flows through the objects of the system when delivering a private message from the Event Source to a Subscriber. This assumes that the application has already started and the event source and subscriber are already connected.
 
     -> EventLoop#notify_read
-        -> MessageStream#read
-            -> EventSourceMessageUnpacker#process_message
-                -> NotificationOrdering#process_notification
-                    -> NotificationTranslator#process_notification
-                        -> NotificationRouter#process_private_message_event
-                            -> NotificationDelivery#deliver_message_to
-                                -> MessageStream#write
-                                    -> EventLoop#notify_write
+    -> MessageStream#read
+    -> EventSourceMessageUnpacker#process_message
+    -> NotificationOrdering#process_notification
+    -> NotificationTranslator#process_notification
+    -> NotificationRouter#process_private_message_event
+    -> NotificationDelivery#deliver_message_to
+    -> MessageStream#write
+    -> EventLoop#notify_write
 
 ## Components
 
