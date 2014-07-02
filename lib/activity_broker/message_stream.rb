@@ -56,7 +56,7 @@ module ActivityBroker
         stream_messages
       rescue IO::WaitReadable
         # IO isn't actually readable.
-      rescue EOFError
+      rescue EOFError, ECONNRESET
         # No more data coming from the other end
         @event_loop.deregister_read(self, :data_received)
       end
