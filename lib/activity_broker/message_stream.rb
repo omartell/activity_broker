@@ -5,6 +5,7 @@ module ActivityBroker
   # complete message it tells the message listener to process the message.
   class MessageStream
     MESSAGE_BOUNDARY = "\n"
+    READ_SIZE = 4096 # bytes
     def initialize(io, event_loop, event_logger)
       @io = io
       @event_loop = event_loop
@@ -52,7 +53,7 @@ module ActivityBroker
 
     def data_received
       begin
-        @read_buffer << @io.read_nonblock(4096)
+        @read_buffer << @io.read_nonblock(READ_SIZE)
         stream_messages
       rescue IO::WaitReadable
         # IO isn't actually readable.
