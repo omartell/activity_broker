@@ -1,4 +1,5 @@
 # Activity Broker
+
 The Activity Broker forwards event notifications in order from an event source to the appropriate subscribers.
 
 <img src="http://cl.ly/image/1a3J0g2B3w1L/Screen%20Shot%202014-07-01%20at%2008.39.40.png">
@@ -14,14 +15,23 @@ Install gems
 Run the application
     
     ruby bin/activity_broker --event_source_port 9090 --subscriber_port 9099
-
+    
 ## Concepts
+[**Application Runner:**](https://github.com/oMartell/activity_broker/blob/master/lib/activity_broker/application_runner.rb) 
+This is the application starting point. The class takes the event source port, subscriber port and an application event logger as configuration parameters, bootstraps all the components and starts accepting TCP connections from the event source and subscribers. Then the runner kicks off the notification processing by starting the main IO event loop.
+    
 
-Application Runner
+## Feature Tests
 
-  This is the application starting point. The class takes
-  the event source port, subscriber port and an application event
-  logger as configuration parameters, bootstraps all the components
-  and starts accepting TCP connections from the event source and
-  subscribers. Then the runner kicks off the notification processing by
-  starting the main IO event loop.
+- [All subscribers are notified of broadcast event](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Subscribers are notified of new followers](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Subscribers are not notified when people stop following them](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [A subscriber no longer receives updates after unfollowing](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Followers are notified of status updates from users they follow](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Subscribers are notified of private messages](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Subscribers receive notifications in order](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+- [Event notifications are ignored if subscriber is not connected](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L44)
+
+
+
+
