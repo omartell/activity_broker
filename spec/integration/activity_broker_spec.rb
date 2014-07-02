@@ -5,12 +5,14 @@ require_relative '../../lib/activity_broker'
 describe 'Activity Broker' do
   include AsyncHelper
 
-  let!(:test_logger) { TestEventLogger.new('/tmp/activity_broker.log', Logger::DEBUG)  }
   let!(:event_source) { FakeEventSource.new('0.0.0.0', 4484, test_logger) }
   let!(:activity_broker) do
     ActivityBroker::ApplicationRunner.new({ event_source_port: 4484,
                                             subscriber_port: 4485,
                                             event_logger: test_logger })
+  end
+  let!(:test_logger) do
+    TestEventLogger.new('/tmp/activity_broker.log', Logger::DEBUG)
   end
   let!(:subscribers) { [ ] }
 
@@ -148,10 +150,11 @@ describe 'Activity Broker' do
 
     event_source.start
 
-    event_source.publish_new_follower_to('bob', 'alice')
+    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice')
     bob_status_update = event_source.publish_status_update_from('bob')
 
     eventually do
+      expect(bob).to have_received_notification_of(alice_following_bob)
       expect(alice).to have_received_notification_of(bob_status_update)
     end
 
