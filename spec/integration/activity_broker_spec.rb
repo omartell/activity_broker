@@ -97,7 +97,11 @@ describe 'Activity Broker' do
 
     event_source.start
 
-    event_source.publish_new_follower_to('bob', 'alice')
+    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice')
+
+    eventually do
+      expect(bob).to have_received_notification_of(alice_following_bob)
+    end
 
     alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
 
