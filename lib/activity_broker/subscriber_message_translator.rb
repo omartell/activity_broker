@@ -1,7 +1,7 @@
 module ActivityBroker
-  # This class knows that any message coming from the subscribers is
-  # the subscription message and then tells to register the subscriber to the
-  # translated message listener.
+  # This class knows that the only message coming from a subscriber is
+  # the subscription message. So, when a message arrives it tells the
+  # translated message listener to register the subscriber.
   class SubscriberMessageTranslator
     def initialize(translated_message_listener)
       @translated_message_listener = translated_message_listener
