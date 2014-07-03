@@ -17,6 +17,10 @@ Install gems
 Run the application
 
     ruby bin/activity_broker --event_source_port 9090 --subscriber_port 9099
+    
+Close the application
+
+    ctrl + c
 
 ## Data Flow
 
