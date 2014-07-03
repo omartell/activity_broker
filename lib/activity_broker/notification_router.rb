@@ -1,4 +1,5 @@
 module ActivityBroker
+  require 'set'
   class NotificationRouter
     # The notification router is in charge of forwarding the
     # notifications to the appropriate subscribers based on the
@@ -6,7 +7,7 @@ module ActivityBroker
     # subscribers followers and uses an instance of
     # NotificationDelivery to write the messages to the subscribers.
     def initialize(notification_delivery, event_logger)
-      @followers = Hash.new { |hash, key| hash[key] = [] }
+      @followers = Hash.new { |hash, key| hash[key] = Set.new }
       @delivery  = notification_delivery
       @event_logger = event_logger
     end
@@ -22,9 +23,11 @@ module ActivityBroker
     end
 
     def process_follow_event(notification)
-      add_follower(notification.sender, notification.recipient)
-      @delivery.deliver_message_to(notification.recipient, notification.message)
-      log(:forwarding_follow_event, notification)
+      unless existing_follower?(notification.sender, notification.recipient)
+        add_follower(notification.sender, notification.recipient)
+        @delivery.deliver_message_to(notification.recipient, notification.message)
+        log(:forwarding_follow_event, notification)
+      end
     end
 
     def process_unfollow_event(notification)
@@ -48,6 +51,10 @@ module ActivityBroker
 
     def log(event, notification)
       @event_logger.log(event, notification)
+    end
+
+    def existing_follower?(follower, followed)
+      @followers[followed].member?(follower)
     end
 
     def remove_follower(follower, followed)

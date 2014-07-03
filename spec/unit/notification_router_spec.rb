@@ -41,5 +41,14 @@ module ActivityBroker
 
       notification_router.process_status_update_event(notification)
     end
+
+    it 'does not register a follower twice' do
+      alice_following_bob = EventNotification.new(1, 'F', 'alice', 'bob', '1|F|alice|bob')
+
+      expect(notification_delivery).to receive(:deliver_message_to).with('bob', alice_following_bob.message).once
+
+      notification_router.process_follow_event(alice_following_bob)
+      notification_router.process_follow_event(alice_following_bob)
+    end
   end
 end
