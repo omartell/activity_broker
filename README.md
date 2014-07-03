@@ -1,7 +1,7 @@
 # Activity Broker
 
 [![Build Status](https://travis-ci.org/oMartell/activity_broker.svg?branch=master)](https://travis-ci.org/oMartell/activity_broker)
-  
+
 The Activity Broker forwards event notifications in order from an event source to the appropriate subscribers.
 
 <img src="http://cl.ly/image/1a3J0g2B3w1L/Screen%20Shot%202014-07-01%20at%2008.39.40.png">
@@ -19,6 +19,8 @@ Run the application
     ruby bin/activity_broker --event_source_port 9090 --subscriber_port 9099
 
 ## Data Flow
+
+The application runs on a single thread and uses an event loop for non-blocking IO operations. Most of the objects in the application operate asynchronously, objects tell other objects to do things.
 
 This is a high level, simplified picture of how the data flows through the objects of the system when delivering a private message from the Event Source to a Subscriber. This assumes that the application has already started and the event source and subscriber are already connected.
 
