@@ -1,5 +1,5 @@
+require 'set'
 module ActivityBroker
-  require 'set'
   class NotificationRouter
     # The notification router is in charge of forwarding the
     # notifications to the appropriate subscribers based on the
@@ -23,9 +23,11 @@ module ActivityBroker
     end
 
     def process_follow_event(notification)
-      unless existing_follower?(notification.sender, notification.recipient)
-        add_follower(notification.sender, notification.recipient)
-        @delivery.deliver_message_to(notification.recipient, notification.message)
+      follower = notification.sender
+      followed = notification.recipient
+      unless existing_follower?(follower, followed)
+        add_follower(follower, followed)
+        @delivery.deliver_message_to(followed, notification.message)
         log(:forwarding_follow_event, notification)
       end
     end

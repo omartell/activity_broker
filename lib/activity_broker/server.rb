@@ -9,7 +9,6 @@ module ActivityBroker
       @port = port
       @event_loop = event_loop
       @event_logger = event_logger
-      @message_streams = []
     end
 
     def accept_connections(&connection_accepted_listener)
