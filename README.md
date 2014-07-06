@@ -28,15 +28,45 @@ The application runs on a single thread and uses an event loop for non-blocking 
 
 This is a high level, simplified picture of how the data flows through the objects of the system when delivering a private message from the Event Source to a Subscriber. This assumes that the application has already started and the event source and subscriber are already connected.
 
-    -> EventLoop#notify_read
-    -> MessageStream#read
-    -> EventSourceMessageUnpacker#process_message
-    -> NotificationOrdering#process_notification
-    -> NotificationTranslator#process_notification
-    -> NotificationRouter#process_private_message_event
-    -> NotificationDelivery#deliver_message_to
-    -> MessageStream#write
-    -> EventLoop#notify_write
+1. **IOListener#notify**
+    
+    Event Loop detects that the TCP socket is readable and tells the IO Listener to notify the consumer (MessageStream#ready_to_read)
+
+2. **MessageStream#ready_to_read**
+    
+    MessageStream reads the message from the TCP socket: '1|P|123|456'
+
+3. **EventSourceMessageUnpacker#process_message**
+    
+    The Unpacker transforms the string '1|P|123|456' into an EventNotification, setting the id, type, sender, recipient and message fields
+
+4. **NotificationOrdering#process_notification**
+    
+    NotificationOrdering looks at the notification id and, assuming this is the next notification in the sequence, then forwards the notification on to the NotificationTranslator
+
+5. **NotificationTranslator#process_notification**
+    
+    The translator knows that a notification with type 'P' is a private message and calls process_private_message_event on the NotificationRouter
+
+6. **NotificationRouter#process_private_message_event**
+    
+    The router tells the notification delivery to deliver the message to the notification recipient '456'
+
+7. **NotificationDelivery#deliver_message_to**
+    
+    This class writes the message to the recipient message stream
+
+8. **MessageStream#write**
+
+    MessageStream enqueues the write command and waits for the TCP socket to be writable
+
+9. **IOListener#notify**
+    
+    Event Loop detects that TCP socket is writable and IO Listener calls MessageStream#ready_to_write
+
+10. **MessageStream#ready_to_write**
+    
+    Finally MessageStream writes the message on the TCP Socket connection
 
 ## Components
 
@@ -97,3 +127,6 @@ The Application Event Logger receives application events forwarded by all the ap
 - [Event notifications are ignored if subscriber is not connected](https://github.com/oMartell/activity_broker/blob/master/spec/integration/activity_broker_spec.rb#L207)
 
 ### [Unit Tests](https://github.com/oMartell/activity_broker/blob/master/spec/unit)
+
+## Things to improve
+- If the Activity Broker never receives the next event in the sequence then NotificationOrdering will keep queueing notifications and eventually it will run out of memory.
