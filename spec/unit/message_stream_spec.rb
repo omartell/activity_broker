@@ -68,7 +68,7 @@ module ActivityBroker
 
       message_stream.read(message_listener)
 
-      expect(event_loop).to receive(:deregister_read).with(message_stream, :data_received)
+      expect(event_loop).to receive(:deregister_read).with(message_stream, :ready_to_read)
 
       event_loop.notify_read_event
     end
