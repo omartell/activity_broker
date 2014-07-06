@@ -25,7 +25,7 @@ module ActivityBroker
     def process_follow_event(notification)
       follower = notification.sender
       followed = notification.recipient
-      unless existing_follower?(follower, followed)
+      if new_follower?(follower, followed)
         add_follower(follower, followed)
         @delivery.deliver_message_to(followed, notification.message)
         log(:forwarding_follow_event, notification)
@@ -33,12 +33,15 @@ module ActivityBroker
     end
 
     def process_unfollow_event(notification)
-      remove_follower(notification.sender, notification.recipient)
+      follower = notification.sender
+      followed = notification.recipient
+      remove_follower(follower, followed)
       log(:discarding_unfollow_event, notification.message)
     end
 
     def process_status_update_event(notification)
-      @followers[notification.sender].each do |follower|
+      followed = notification.sender
+      @followers[followed].each do |follower|
         @delivery.deliver_message_to(follower, notification.message)
       end
       log(:forwarding_status_update, notification)
@@ -55,8 +58,8 @@ module ActivityBroker
       @event_logger.log(event, notification)
     end
 
-    def existing_follower?(follower, followed)
-      @followers[followed].member?(follower)
+    def new_follower?(follower, followed)
+      !@followers[followed].member?(follower)
     end
 
     def remove_follower(follower, followed)
