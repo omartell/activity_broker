@@ -11,7 +11,7 @@ module ActivityBroker
       @event_logger = event_logger
     end
 
-    def accept_connections(&connection_accepted_listener)
+    def on_connection_accepted(&connection_accepted_listener)
       @event_logger.log(:server_accepting_connections, @port)
       @tcp_server = TCPServer.new(@port)
       @connection_accepted_listener = connection_accepted_listener
