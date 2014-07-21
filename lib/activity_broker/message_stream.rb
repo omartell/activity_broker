@@ -6,6 +6,8 @@ module ActivityBroker
   class MessageStream
     MESSAGE_BOUNDARY = "\n"
     READ_SIZE = 4096 # bytes
+    MESSAGE_REGEX = /([^\n]*)\n/
+
     def initialize(io, event_loop, event_logger)
       @io = io
       @event_loop = event_loop
@@ -14,8 +16,8 @@ module ActivityBroker
       @write_buffer = ''
     end
 
-    def read(message_listener)
-      @message_listener = message_listener
+    def on_message_received(&message_received_handler)
+      @message_received_handler = message_received_handler
       @event_loop.register_read(self, :ready_to_read, :close_reading)
     end
 
@@ -40,36 +42,31 @@ module ActivityBroker
     end
 
     def ready_to_write
-      begin
-        written_so_far = @io.write_nonblock(@write_buffer)
-        @write_buffer.slice!(0, written_so_far)
-        if @write_buffer.empty?
-          @event_loop.deregister_write(self, :ready_to_write)
-        end
-      rescue Errno::EAGAIN
-        # write would actually block
+      written_so_far = @io.write_nonblock(@write_buffer)
+      @write_buffer.slice!(0, written_so_far)
+      if @write_buffer.empty?
+        @event_loop.deregister_write(self, :ready_to_write)
       end
+    rescue Errno::EAGAIN
+        # write would actually block
     end
 
     def ready_to_read
-      begin
-        @read_buffer << @io.read_nonblock(READ_SIZE)
-        stream_messages
-      rescue IO::WaitReadable
-        # IO isn't actually readable.
-      rescue EOFError, Errno::ECONNRESET
-        # No more data coming from the other end
-        @event_loop.deregister_read(self, :ready_to_read)
-      end
+      @read_buffer << @io.read_nonblock(READ_SIZE)
+      stream_messages
+    rescue IO::WaitReadable
+      # IO isn't actually readable.
+    rescue EOFError, Errno::ECONNRESET
+      # No more data coming from the other end
+      @event_loop.deregister_read(self, :ready_to_read)
     end
 
     def stream_messages
-      message_regex = /([^\n]*)\n/
-      @read_buffer.scan(message_regex).flatten.each do |m|
-        @event_logger.log(:streaming_message, m)
-        @message_listener.process_message(m, self)
+      @read_buffer.scan(MESSAGE_REGEX).flatten.each do |message|
+        @event_logger.log(:streaming_message, message)
+        @message_received_handler.call(message, self)
       end
-      @read_buffer = @read_buffer.gsub(message_regex, '')
+      @read_buffer = @read_buffer.gsub(MESSAGE_REGEX, '')
     end
   end
 end

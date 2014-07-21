@@ -26,15 +26,16 @@ module ActivityBroker
     let!(:event_loop) { FakeEventLoop.new  }
     let!(:fake_io) { double }
     let!(:message_stream){ MessageStream.new(fake_io, event_loop, double.as_null_object) }
-    let!(:message_listener) { double(:process_message) }
+    let!(:message_received_handler) { Proc.new { } }
     let!(:one_message) { '1|U|sender|recipient' }
 
     it 'streams complete messages to the message listener' do
-      fake_io.stub(read_nonblock: "1|U|sender|recipient" + MessageStream::MESSAGE_BOUNDARY + "2|U|sender")
+      message = "1|U|sender|recipient" + MessageStream::MESSAGE_BOUNDARY + "2|U|sender"
+      fake_io.stub(read_nonblock: message)
 
-      message_stream.read(message_listener)
+      message_stream.on_message_received(&message_received_handler)
 
-      expect(message_listener).to receive(:process_message)
+      expect(message_received_handler).to receive(:call)
         .with(one_message, message_stream)
 
       event_loop.notify_read_event
@@ -66,7 +67,7 @@ module ActivityBroker
     it 'deregisters read listener when there\'s no more data coming from the other end' do
       fake_io.stub(:read_nonblock) { raise EOFError }
 
-      message_stream.read(message_listener)
+      message_stream.on_message_received(&message_received_handler)
 
       expect(event_loop).to receive(:deregister_read).with(message_stream, :ready_to_read)
 

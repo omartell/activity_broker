@@ -19,16 +19,22 @@ module ActivityBroker
       notification_translator = NotificationTranslator.new(notification_router)
       notification_ordering   = NotificationOrdering.new(notification_translator, @event_logger)
       message_unpacker        = EventSourceMessageUnpacker.new(notification_ordering)
+      subscriber_translator = SubscriberMessageTranslator.new(notification_router)
 
       @event_logger.log(:starting_activity_broker)
 
-      event_source_server.on_connection_accepted do |message_stream|
-        message_stream.read(message_unpacker)
+      event_source_server.on_connection_accepted do |connection|
+        message_stream = MessageStream.new(connection, @event_loop, @event_logger)
+        message_stream.on_message_received do |message, message_stram|
+          message_unpacker.process_message(message, message_stream)
+        end
       end
 
-      subscriber_translator = SubscriberMessageTranslator.new(notification_router)
-      subscriber_server.on_connection_accepted do |message_stream|
-        message_stream.read(subscriber_translator)
+      subscriber_server.on_connection_accepted do |connection|
+        message_stream = MessageStream.new(connection, @event_loop, @event_logger)
+        message_stream.on_message_received do |message, message_stream|
+          subscriber_translator.process_message(message, message_stream)
+        end
       end
 
       @event_loop.start

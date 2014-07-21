@@ -11,10 +11,10 @@ module ActivityBroker
       @event_logger = event_logger
     end
 
-    def on_connection_accepted(&connection_accepted_listener)
+    def on_connection_accepted(&connection_accepted_handler)
       @event_logger.log(:server_accepting_connections, @port)
       @tcp_server = TCPServer.new(@port)
-      @connection_accepted_listener = connection_accepted_listener
+      @connection_accepted_handler = connection_accepted_handler
       @event_loop.register_read(self, :process_new_connection, :close_server)
     end
 
@@ -29,10 +29,8 @@ module ActivityBroker
     end
 
     def process_new_connection
-      connection     = @tcp_server.accept_nonblock
-      message_stream = MessageStream.new(connection, @event_loop, @event_logger)
-
-      @connection_accepted_listener.call(message_stream)
+      connection = @tcp_server.accept_nonblock
+      @connection_accepted_handler.call(connection)
       @event_logger.log(:connection_accepted, @port)
     end
   end
