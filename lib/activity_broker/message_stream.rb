@@ -22,6 +22,8 @@ module ActivityBroker
     end
 
     def write(message)
+      puts "message"
+      puts message.inspect
       @write_buffer << message
       @write_buffer << MESSAGE_BOUNDARY
       @event_loop.register_write(self, :ready_to_write, :close_writting)

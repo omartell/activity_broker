@@ -13,20 +13,21 @@ module ActivityBroker
     end
 
     def start
-      event_source_server = start_server_on(:event_source_port)
-      subscriber_server   = start_server_on(:subscriber_port)
+      event_source_server = Server.new(@config.fetch(:event_source_port), @event_loop, @event_logger)
+      subscriber_server   = Server.new(@config.fetch(:subscriber_port), @event_loop, @event_logger)
       notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
       notification_translator = NotificationTranslator.new(notification_router)
       notification_ordering   = NotificationOrdering.new(notification_translator, @event_logger)
-      message_unpacker        = EventSourceMessageUnpacker.new(notification_ordering)
+      message_converter = MessageConverter.new
       subscriber_translator = SubscriberMessageTranslator.new(notification_router)
 
       @event_logger.log(:starting_activity_broker)
 
       event_source_server.on_connection_accepted do |connection|
         message_stream = MessageStream.new(connection, @event_loop, @event_logger)
-        message_stream.on_message_received do |message, message_stram|
-          message_unpacker.process_message(message, message_stream)
+        message_stream.on_message_received do |message, message_stream|
+          notification = message_converter.message_to_notification(message)
+          notification_ordering.process_notification(notification)
         end
       end
 
@@ -42,12 +43,6 @@ module ActivityBroker
 
     def stop
       @event_loop.stop
-    end
-
-    private
-
-    def start_server_on(port)
-      Server.new(@config.fetch(port), @event_loop, @event_logger)
     end
   end
 end
