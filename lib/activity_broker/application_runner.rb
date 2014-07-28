@@ -18,7 +18,6 @@ module ActivityBroker
       notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
       notification_translator = NotificationTranslator.new(notification_router)
       notification_ordering   = NotificationOrdering.new(notification_translator, @event_logger)
-      message_converter = MessageConverter.new
       subscriber_translator = SubscriberMessageTranslator.new(notification_router)
 
       @event_logger.log(:starting_activity_broker)
@@ -26,7 +25,7 @@ module ActivityBroker
       event_source_server.on_connection_accepted do |connection|
         message_stream = MessageStream.new(connection, @event_loop, @event_logger)
         message_stream.on_message_received do |message, message_stream|
-          notification = message_converter.message_to_notification(message)
+          notification = EventNotification.from_message(message, @event_logger)
           notification_ordering.process_notification(notification)
         end
       end

@@ -45,7 +45,7 @@ describe 'Activity Broker' do
     start_activity_broker
 
     subscribers = 10.times.map do |id|
-      start_subscriber('alice' + id.to_s)
+      start_subscriber('123' + id.to_s)
     end
 
     event_source.start
@@ -62,20 +62,20 @@ describe 'Activity Broker' do
   specify 'Subscribers are notified of new followers' do
     start_activity_broker
 
-    bob     = start_subscriber('bob')
-    alice   = start_subscriber('alice')
-    robert  = start_subscriber('robert')
+    bob     = start_subscriber('456')
+    alice   = start_subscriber('123')
+    robert  = start_subscriber('789')
 
     event_source.start
 
-    alice_following_bob  = event_source.publish_new_follower_to('bob', 'alice')
-    robert_following_bob = event_source.publish_new_follower_to('bob', 'robert')
+    alice_following_bob  = event_source.publish_new_follower_to('456', '123')
+    robert_following_bob = event_source.publish_new_follower_to('456', '789')
 
-    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert')
-    bob_following_alice    = event_source.publish_new_follower_to('alice', 'bob')
+    robert_following_alice = event_source.publish_new_follower_to('123', '789')
+    bob_following_alice    = event_source.publish_new_follower_to('123', '456')
 
-    alice_following_robert = event_source.publish_new_follower_to('robert', 'alice')
-    bob_following_robert   = event_source.publish_new_follower_to('robert', 'bob')
+    alice_following_robert = event_source.publish_new_follower_to('789', '123')
+    bob_following_robert   = event_source.publish_new_follower_to('789', '456')
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)
@@ -92,18 +92,18 @@ describe 'Activity Broker' do
   specify 'Subscribers are not notified when people stop following them' do
     start_activity_broker
 
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
+    bob   = start_subscriber('456')
+    alice = start_subscriber('123')
 
     event_source.start
 
-    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice')
+    alice_following_bob = event_source.publish_new_follower_to('456', '123')
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)
     end
 
-    alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
+    alice_unfollowed_bob = event_source.publish_unfollow_to('456', '123')
 
     eventually do
       expect(test_logger).to have_received_event(:discarding_unfollow_event,
@@ -114,12 +114,12 @@ describe 'Activity Broker' do
   specify 'Subscribers are notified of private messages' do
     start_activity_broker
 
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
+    bob   = start_subscriber('456')
+    alice = start_subscriber('123')
 
     event_source.start
 
-    private_message = event_source.publish_private_message_to('bob', 'alice')
+    private_message = event_source.publish_private_message_to('456', '123')
 
     eventually do
       expect(bob).to have_received_notification_of(private_message)
@@ -129,16 +129,16 @@ describe 'Activity Broker' do
   specify 'Followers are notified of status updates from users they follow' do
     start_activity_broker
 
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
+    bob   = start_subscriber('456')
+    alice = start_subscriber('123')
 
     event_source.start
 
-    event_source.publish_new_follower_to('bob', 'alice')
-    bob_status_update = event_source.publish_status_update_from('bob')
+    event_source.publish_new_follower_to('456', '123')
+    bob_status_update = event_source.publish_status_update_from('456')
 
-    event_source.publish_new_follower_to('alice', 'bob')
-    alice_status_update = event_source.publish_status_update_from('alice')
+    event_source.publish_new_follower_to('123', '456')
+    alice_status_update = event_source.publish_status_update_from('123')
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
@@ -149,27 +149,27 @@ describe 'Activity Broker' do
   specify 'A subscriber no longer receives updates after unfollowing' do
     start_activity_broker
 
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
+    bob   = start_subscriber('456')
+    alice = start_subscriber('123')
 
     event_source.start
 
-    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice')
-    bob_status_update = event_source.publish_status_update_from('bob')
+    alice_following_bob = event_source.publish_new_follower_to('456', '123')
+    bob_status_update = event_source.publish_status_update_from('456')
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)
       expect(alice).to have_received_notification_of(bob_status_update)
     end
 
-    alice_unfollowed_bob = event_source.publish_unfollow_to('bob', 'alice')
+    alice_unfollowed_bob = event_source.publish_unfollow_to('456', '123')
 
     eventually do
       expect(test_logger).to have_received_event(:discarding_unfollow_event,
                                                  alice_unfollowed_bob)
     end
 
-    new_bob_status_update = event_source.publish_status_update_from('bob')
+    new_bob_status_update = event_source.publish_status_update_from('456')
 
     eventually do
       expect(alice).not_to have_received_notification_of(new_bob_status_update)
@@ -179,21 +179,21 @@ describe 'Activity Broker' do
   specify 'Subscribers receive notifications in order' do
     start_activity_broker
 
-    bob   = start_subscriber('bob')
-    alice = start_subscriber('alice')
+    bob   = start_subscriber('456')
+    alice = start_subscriber('123')
 
     event_source.start
 
-    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert', id: 1)
-    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice', id: 2)
-    newer_bob_status_update = event_source.publish_status_update_from('bob', id: 4)
+    robert_following_alice = event_source.publish_new_follower_to('123', '789', id: 1)
+    alice_following_bob = event_source.publish_new_follower_to('456', '123', id: 2)
+    newer_bob_status_update = event_source.publish_status_update_from('456', id: 4)
 
     eventually do
       expect(alice).to have_received_notification_of(robert_following_alice)
       expect(bob).to have_received_notification_of(alice_following_bob)
     end
 
-    bob_status_update = event_source.publish_status_update_from('bob', id: 3)
+    bob_status_update = event_source.publish_status_update_from('456', id: 3)
 
     eventually do
       expect(alice).to have_received_notification_of(bob_status_update)
@@ -207,12 +207,12 @@ describe 'Activity Broker' do
   specify 'Event notifications are ignored if subscriber is not connected' do
     start_activity_broker
 
-    bob = start_subscriber('bob')
+    bob = start_subscriber('456')
 
     event_source.start
 
-    alice_following_bob = event_source.publish_new_follower_to('bob', 'alice', id: 1)
-    robert_following_alice = event_source.publish_new_follower_to('alice', 'robert', id: 2)
+    alice_following_bob = event_source.publish_new_follower_to('456', '123', id: 1)
+    robert_following_alice = event_source.publish_new_follower_to('123', '789', id: 2)
 
     eventually do
       expect(bob).to have_received_notification_of(alice_following_bob)

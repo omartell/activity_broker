@@ -9,11 +9,11 @@ module ActivityBroker
     end
 
     it 'forwards notifications in order' do
-      first_status  = EventNotification.new(1, 'S', 'alice')
-      second_status = EventNotification.new(2, 'S', 'alice')
-      third_status  = EventNotification.new(3, 'S', 'alice')
-      fourth_status = EventNotification.new(4, 'S', 'alice')
-      fifth_status  = EventNotification.new(5, 'S', 'alice')
+      first_status  = Broadcast.new(id: 1)
+      second_status = Follower.new(id: 2, sender: 123, recipient: 456)
+      third_status  = Follower.new(id: 3, sender: 123, recipient: 789)
+      fourth_status = Unfollowed.new(id: 4, sender: 123, recipient: 789)
+      fifth_status  = PrivateMessage.new(id: 5, sender: 123, recipient: 789)
 
       expect(notification_listener).to receive(:process_notification)
         .with(first_status).ordered
@@ -30,8 +30,8 @@ module ActivityBroker
     end
 
     it 'buffers notifications until receives notification with id 1' do
-      first_status = EventNotification.new(1, 'S', 'alice')
-      second_status = EventNotification.new(2, 'S', 'alice')
+      second_status = Follower.new(id: 2, sender: 123, recipient: 456)
+      first_status  = Follower.new(id: 1, sender: 123, recipient: 789)
 
       expect(notification_listener).to receive(:process_notification)
         .with(first_status).ordered

@@ -12,7 +12,9 @@ module ActivityBroker
     end
 
     def log(event, *other)
-      send(event, *other)
+      if self.respond_to?(event)
+        send(event, *other)
+      end
     end
 
     private
