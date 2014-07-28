@@ -15,7 +15,7 @@ module ActivityBroker
     def start
       event_source_server = Server.new(@config.fetch(:event_source_port), @event_loop, @event_logger)
       subscriber_server   = Server.new(@config.fetch(:subscriber_port), @event_loop, @event_logger)
-      notification_router     = NotificationRouter.new(NotificationDelivery.new, @event_logger)
+      notification_router     = NotificationRouter.new(NotificationDelivery.new(@event_logger), @event_logger)
       notification_translator = NotificationTranslator.new(notification_router)
       notification_ordering   = NotificationOrdering.new(notification_translator, @event_logger)
       subscriber_translator = SubscriberMessageTranslator.new(notification_router)

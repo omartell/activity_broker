@@ -2,7 +2,18 @@ require 'spec_helper'
 
 module ActivityBroker
   describe NotificationDelivery do
-    let!(:notification_delivery) { NotificationDelivery.new }
+    let!(:notification_delivery) { NotificationDelivery.new(logger) }
+    let!(:logger) { double(:logger) }
+
+    it 'logs subscriber id not recognized when subscriber id is not a number' do
+      expect(logger).to receive(:log).with(:malformed_subscriber_id, 'alice')
+
+      notification_delivery.add_subscriber('alice', double(:message_stream))
+
+      expect(logger).to receive(:log).with(:malformed_subscriber_id, 'alice')
+
+      notification_delivery.deliver_message_to('alice', 'hello!')
+    end
 
     it 'delivers messages to all currently registered subscribers' do
       alice_message_stream   = double
@@ -10,9 +21,9 @@ module ActivityBroker
       xavier_message_stream  = double
       broadcast_notification = Broadcast.new(id: 1)
 
-      notification_delivery.add_subscriber('alice', alice_message_stream)
-      notification_delivery.add_subscriber('bob', bob_message_stream)
-      notification_delivery.add_subscriber('xavier', xavier_message_stream)
+      notification_delivery.add_subscriber('123', alice_message_stream)
+      notification_delivery.add_subscriber('456', bob_message_stream)
+      notification_delivery.add_subscriber('789', xavier_message_stream)
 
       expect(alice_message_stream).to receive(:write).with(broadcast_notification.message)
       expect(bob_message_stream).to receive(:write).with(broadcast_notification.message)

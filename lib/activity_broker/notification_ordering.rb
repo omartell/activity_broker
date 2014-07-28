@@ -22,6 +22,7 @@ module ActivityBroker
     private
 
     def queue_notification(notification)
+      puts 'queueing notification ' + notification.inspect
       @notification_queue[notification.id] = notification
     end
 
@@ -34,6 +35,7 @@ module ActivityBroker
     end
 
     def forward_notification(notification)
+      puts 'forwarding notification ' + notification.inspect
       @notification_listener.process_notification(notification)
       @last_notification = notification
       @notification_queue.delete(notification.id)

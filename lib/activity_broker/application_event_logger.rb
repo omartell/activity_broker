@@ -12,9 +12,7 @@ module ActivityBroker
     end
 
     def log(event, *other)
-      if self.respond_to?(event)
-        send(event, *other)
-      end
+      send(event, *other)
     end
 
     private
@@ -45,6 +43,7 @@ module ActivityBroker
     end
 
     def registering_subscriber(subscriber_id)
+      puts 'REGISTEING'
       log_debug('registering subscriber ' + subscriber_id)
     end
 

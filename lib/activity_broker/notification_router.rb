@@ -15,6 +15,7 @@ module ActivityBroker
     def register_subscriber(subscriber_id, subscriber_stream)
       @delivery.add_subscriber(subscriber_id, subscriber_stream)
       log(:registering_subscriber, subscriber_id)
+      puts 'adding subscriber' + Integer(subscriber_id).inspect
     end
 
     def process_broadcast_event(notification)
