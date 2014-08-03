@@ -1,48 +1,21 @@
 module ActivityBroker
   class EventNotification
-
-    MESSAGE_TYPES_TO_NOTIFICATIONS = {
-      'F' => -> (event) { Follower.new(event) },
-      'U' => -> (event) { Unfollowed.new(event) },
-      'S' => -> (event) { StatusUpdate.new(event) },
-      'P' => -> (event) { PrivateMessage.new(event) },
-      'B' => -> (event) { Broadcast.new(event) }
-    }
-
     attr_reader :id, :sender, :recipient, :message, :type
 
-    def self.from_message(message, logger = nil)
-      id, type, sender, recipient = message.split('|')
-      notification = MESSAGE_TYPES_TO_NOTIFICATIONS[type]
-
-      if notification
-        event = { id: id, sender: sender, recipient: recipient, message: message }
-        notification.call(event)
-      else
-        logger.log(:unknown_notification_type, message) if logger
-        nil
-      end
-    rescue ArgumentError => error
-      logger.log(:malformed_message, message, error.message) if logger
-      nil
+    def initialize_id
+      @id = validate_numerical(@event[:id])
     end
 
-    def initialize(event_data)
-      @id     = validate_numerical(event_data[:id])
-      @sender = validate_numerical(event_data[:sender])
-      @recipient = validate_numerical(event_data[:recipient])
-      @type      = event_data[:type]
-      @message   = event_data[:message]
+    def initialize_sender
+      @sender = validate_numerical(@event[:sender])
     end
 
-    def to_s
-      message
+    def initialize_recipient
+      @recipient = validate_numerical(@event[:recipient])
     end
 
-    def validate_numerical(number)
-      if !number.nil?
-        Integer(number)
-      end
+    def initialize_message
+      @message = validate_presence(@event[:message], :message)
     end
 
     def validate_presence(arg, argument_name)
@@ -50,6 +23,12 @@ module ActivityBroker
         raise ArgumentError.new("#{argument_name.to_s} is required")
       else
         arg
+      end
+    end
+
+    def validate_numerical(number)
+      if !number.nil?
+        Integer(number)
       end
     end
 
@@ -63,37 +42,89 @@ module ActivityBroker
   end
 
   class Follower < EventNotification
-    def initialize(*args)
-      super
-      validate_presence(sender, :follower)
-      validate_presence(recipient, :followed)
+    def initialize(event, follower_repository, postman, logger)
+      @event = event
+      @postman = postman
+      @follower_repository = follower_repository
+      @logger = logger
+      initialize_id
+      initialize_sender
+      initialize_recipient
+      initialize_message
+    end
+
+    def publish
+      @follower_repository.add_follower(follower: sender, followed: recipient)
+      @postman.deliver(message: message, to: recipient)
     end
   end
 
   class Unfollowed < EventNotification
-    def initialize(*args)
-      super
-      validate_presence(sender, :follower)
-      validate_presence(recipient, :followed)
+    def initialize(event, follower_repository, postman, logger)
+      @event = event
+      @follower_repository = follower_repository
+      @postman = postman
+      @logger = logger
+      initialize_id
+      initialize_sender
+      initialize_recipient
+      initialize_message
+    end
+
+    def publish
+      @logger.log(:discarding_unfollow_event, message)
+      @follower_repository.remove_follower(follower: sender, followed: recipient)
     end
   end
 
   class StatusUpdate < EventNotification
-    def initialize(*args)
-      super
-      validate_presence(sender, :followed)
+    def initialize(event, follower_repository, postman, logger)
+      @event = event
+      @follower_repository = follower_repository
+      @postman = postman
+      @logger  = logger
+      initialize_id
+      initialize_sender
+      initialize_message
+    end
+
+    def publish
+      followers = @follower_repository.following(sender)
+      @logger.send(:log_info, 'sending status update: ' + followers.inspect)
+      @postman.deliver(message: @event[:message], to: followers)
     end
   end
 
   class PrivateMessage < EventNotification
-    def initialize(*args)
-      super
-      validate_presence(sender, :sender)
-      validate_presence(recipient, :recipient)
+    def initialize(event, follower_repository, postman, logger)
+      @event = event
+      @follower_repository = follower_repository
+      @postman = postman
+      @logger = logger
+      initialize_id
+      initialize_sender
+      initialize_recipient
+      initialize_message
+    end
+
+    def publish
+      if @follower_repository.is_follower?(follower: sender, followed: recipient)
+        @postman.deliver(message: message, to: recipient)
+      end
     end
   end
 
   class Broadcast < EventNotification
+    def initialize(event, postman, logger)
+      @event = event
+      @postman = postman
+      @logger = logger
+      initialize_id
+      initialize_message
+    end
 
+    def publish
+      @postman.deliver_to_all(message)
+    end
   end
 end

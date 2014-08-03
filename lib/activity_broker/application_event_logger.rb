@@ -43,7 +43,6 @@ module ActivityBroker
     end
 
     def registering_subscriber(subscriber_id)
-      puts 'REGISTEING'
       log_debug('registering subscriber ' + subscriber_id)
     end
 

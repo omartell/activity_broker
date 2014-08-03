@@ -1,7 +1,7 @@
 module ActivityBroker
   # This class is in charge of delivering a message to a specific
   # subscriber.
-  class NotificationDelivery
+  class Postman
     def initialize(logger)
       @subscribers = {}
       @logger = logger
@@ -9,20 +9,22 @@ module ActivityBroker
 
     def add_subscriber(subscriber_id, subscriber_stream)
       @subscribers[Integer(subscriber_id)] = subscriber_stream
+      @logger.log(:registering_subscriber, subscriber_id)
     rescue ArgumentError => error
       @logger.log(:malformed_subscriber_id, subscriber_id)
     end
 
-    def deliver_message_to(subscriber_id, message)
-      subscriber_stream = @subscribers[Integer(subscriber_id)]
-      if subscriber_stream
+    def deliver(message: , to:)
+      Array(to).map do |recipient|
+        @subscribers[Integer(recipient)]
+      end.compact.each do |subscriber_stream|
         subscriber_stream.write(message)
       end
     rescue ArgumentError => error
-      @logger.log(:malformed_subscriber_id, subscriber_id)
+      @logger.log(:malformed_subscriber_id, to)
     end
 
-    def deliver_message_to_everyone(message)
+    def deliver_to_all(message)
       @subscribers.each do |subscriber_id, subscriber_stream|
         subscriber_stream.write(message)
       end

@@ -119,6 +119,7 @@ describe 'Activity Broker' do
 
     event_source.start
 
+    alice_following_bob = event_source.publish_new_follower_to('456', '123')
     private_message = event_source.publish_private_message_to('456', '123')
 
     eventually do

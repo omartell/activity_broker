@@ -1,67 +1,94 @@
 require 'spec_helper'
 
 module ActivityBroker
-  describe EventNotification do
-    it 'expects a number as the message id' do
-      status_update = EventNotification.from_message('1|S|123|456')
+  describe Follower do
+    let!(:postman) { double(:postman) }
+    let!(:follower_repository) { double(:follower_repository, add_follower: nil) }
 
-      expect(status_update.id).to be_a Integer
-    end
+    it 'registers a follower' do
+      alice_following_bob = Follower.new({ id: 1, sender: 123, recipient: 456, message:'1|F|123|456' },
+                                         follower_repository,
+                                         postman,
+                                         double.as_null_object)
 
-    it 'expects a number for sender when there is one' do
-      status_update = EventNotification.from_message('1|S|123|456')
+      expect(follower_repository).to receive(:add_follower).with(follower: 123, followed: 456)
+      expect(postman).to receive(:deliver).with(message: '1|F|123|456', to: 456).once
 
-      expect(status_update.id).to be_a Integer
-    end
-
-    it 'expects a number for recipient when there is one' do
-      status_update = EventNotification.from_message('1|S|123|456')
-
-      expect(status_update.recipient).to be_a Integer
-    end
-
-    it 'is equal to another notification when the event data matches' do
-      status_update_a = EventNotification.from_message('1|S|123|456')
-      status_update_b = EventNotification.from_message('1|S|123|456')
-
-      expect(status_update_a).to eq status_update_b
-    end
-
-    context 'malformed messages' do
-      it 'raises an argument error when id is not a number' do
-        expect do
-          EventNotification.new(id: 'blah')
-        end.to raise_error(ArgumentError)
-      end
-
-      it 'raises an argument error when sender is not a number' do
-        expect do
-          EventNotification.new(id: 1, sender: 'blah')
-        end.to raise_error(ArgumentError)
-      end
-
-      it 'logs unknwon notification type errors' do
-        logger = double(:logger, log: nil)
-
-        expect(logger).to receive(:log).with(:unknown_notification_type, '1|blah|foo')
-
-        EventNotification.from_message('1|blah|foo', logger)
-      end
-
-      it 'logs malformed message errors' do
-        logger = double(:logger, log: nil)
-
-        expect(logger).to receive(:log).with(:malformed_message, '1|F|foo|bar', 'invalid value for Integer(): "foo"')
-
-        EventNotification.from_message('1|F|foo|bar', logger)
-      end
-
-      it 'does not log anything when there is no log' do
-        expect do
-          EventNotification.from_message('1|F|foo|bar')
-          EventNotification.from_message('1|blah|foo')
-        end.not_to raise_error
-      end
+      alice_following_bob.publish
     end
   end
+
+  describe Unfollowed do
+    let!(:postman) { double(:postman) }
+    let!(:follower_repository) { double(:follower_repository, add_follower: nil) }
+
+    it 'removes follower from recipient\'s followers' do
+      unfollowed = Unfollowed.new({ id: 1, sender: 123, recipient: 456, message: '1|U|123|456' },
+                                  follower_repository,
+                                  postman,
+                                  double.as_null_object)
+
+      expect(follower_repository).to receive(:remove_follower).with(follower: 123, followed: 456)
+
+      unfollowed.publish
+    end
+  end
+
+  describe StatusUpdate do
+    let!(:postman) { double(:postman, deliver: nil) }
+    let!(:follower_repository) { double(:follower_repository, following: [1,2,3]) }
+
+    it 'publishes status update to followers' do
+      status_update = StatusUpdate.new({ id: 1, sender: 123, message: '1|S|123'},
+                                       follower_repository,
+                                       postman,
+                                       double.as_null_object)
+
+      expect(follower_repository).to receive(:following).with(123)
+      expect(postman).to receive(:deliver).with(message: '1|S|123', to: [1,2,3])
+
+      status_update.publish
+    end
+  end
+
+  describe PrivateMessage do
+    let!(:postman) { double(:postman, deliver: nil) }
+    let!(:follower_repository) { double(:follower_repository, following: [1,2,3]) }
+
+    it 'publishes private message if sender follows recipient' do
+      private_message = PrivateMessage.new({ id: 1, sender: 123, recipient: 456, message: '1|P|123|456' },
+                                           follower_repository,
+                                           postman,
+                                           double.as_null_object)
+
+      allow(follower_repository).to receive(:is_follower?).and_return(true)
+
+      expect(postman).to receive(:deliver).with(message: '1|P|123|456', to: 456)
+
+      private_message.publish
+    end
+
+    it 'does not publish private message if sender doesnt follow recipient' do
+      private_message = PrivateMessage.new({id: 1, nsender: 123, recipient: 456, message: '1|P|123|456'}, follower_repository, postman, double)
+
+      allow(follower_repository).to receive(:is_follower?).and_return(false)
+
+      expect(postman).not_to receive(:forward).with(message: '1|P|123|456', to: 456)
+
+      private_message.publish
+    end
+  end
+
+  describe Broadcast do
+    let!(:postman) { double(:postman) }
+
+    it 'publishes message to all connected subscribers' do
+      broadcast = Broadcast.new({ id: 1, message: '1|B' }, postman, double)
+
+      expect(postman).to receive(:deliver_to_all).with('1|B')
+
+      broadcast.publish
+    end
+  end
+
 end
