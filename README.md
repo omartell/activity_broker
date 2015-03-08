@@ -1,10 +1,8 @@
 # Activity Broker
 
-[![Build Status](https://travis-ci.org/oMartell/activity_broker.svg?branch=master)](https://travis-ci.org/oMartell/activity_broker)
+[![Build Status](https://travis-ci.org/omartell/activity_broker.svg?branch=master)](https://travis-ci.org/omartell/activity_broker)
 
 The Activity Broker forwards event notifications in order from an event source to the appropriate subscribers.
-
-<img src="http://cl.ly/image/1a3J0g2B3w1L/Screen%20Shot%202014-07-01%20at%2008.39.40.png">
 
 ## Usage
 
